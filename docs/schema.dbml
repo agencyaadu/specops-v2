@@ -1,0 +1,274 @@
+// SpecOps v2 — append-only schema
+//
+// All five tables live in the Postgres `v2` schema and are append-only:
+// no UPDATE, no DELETE (enforced by BEFORE UPDATE/DELETE triggers).
+// Corrections = INSERT a new row with the same stable key (pan_hash,
+// factory_id, etc.). Reads come from views that pick the latest row
+// per stable key.
+//
+// Refs in this file describe the *logical* relationship, not a Postgres
+// foreign key. The targets aren't unique (multiple rows per pan_hash by
+// design), so we cannot enforce FK at the table level. Logical refs
+// stay readable in dbdiagram.io.
+//
+// Paste into https://dbdiagram.io/d to render.
+
+Project specops_v2 {
+  database_type: 'PostgreSQL'
+  Note: '''
+  # SpecOps v2
+
+  Five append-only tables, ten read views, validator chain.
+
+  - **Source of writes**: 4 forms (onboarding, factory visit report,
+    assignment, daily). Each form = one INSERT into one table.
+  - **Source of reads**: views collapse to "latest row per stable key".
+  - **Approval chain**: operator → captain → chief → general.
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// 1. operators — every human in the system
+// ---------------------------------------------------------------------------
+
+Table operators {
+  id                  bigserial    [pk]
+  pan_hash            text         [not null, note: 'sha256 of PAN/Aadhaar — stable identity']
+  email               text         [note: 'optional — operators on the floor often have none']
+
+  full_name           text         [not null, note: 'always UPPERCASE']
+  whatsapp            text
+  google_id           text
+
+  telegram_id         text
+  discord_id          text
+  twitter_id          text
+  referred_by         text
+
+  languages           text         [note: 'comma-joined']
+  hardest_problem     text
+  health_notes        text
+
+  address_line1       text
+  address_line2       text
+  pincode             text
+  city                text
+  state_name          text
+
+  upi_id              text
+  beneficiary_name    text
+  account_number_enc  bytea        [note: 'AES-256 ciphertext']
+  ifsc_code           text
+  bank_name           text
+  branch_name         text
+  pan_number_enc      bytea        [note: 'AES-256 ciphertext']
+
+  pan_card_url        text
+  profile_picture_url text
+  intro_video_url     text
+
+  consented           boolean      [not null, default: false]
+  consented_terms     boolean      [not null, default: false]
+
+  rank                text         [not null, note: "FREDDY | GENERAL | CHIEF | CAPTAIN | OPERATOR | VIEWER | APPLICANT"]
+  op_state            text         [not null, default: 'ACTIVE', note: 'ACTIVE | INACTIVE']
+
+  ts                  timestamptz  [not null, default: `now()`]
+  submitted_by        text         [not null, note: '"self" for self-onboarding else email']
+
+  Indexes {
+    (pan_hash, id) [name: 'operators_pan_id', note: 'DESC on id; powers latest-row dedup']
+    email          [name: 'operators_email', note: 'where email is not null']
+    (rank, op_state) [name: 'operators_rank_state']
+  }
+
+  Note: '''
+  Replaces v1 tables `submissions` + `bot_roles`.
+  Append-only. Latest row per `pan_hash` is the canonical "current" record.
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// 2. factories — physical sites with their visit-report data
+// ---------------------------------------------------------------------------
+
+Table factories {
+  id                     bigserial    [pk]
+  factory_id             text         [not null, note: 'slug of factory_name']
+  factory_name           text         [not null, note: 'always UPPERCASE']
+
+  shift_count            smallint     [not null, note: '2 -> {AM, PM}, 3 -> {SHIFT A, SHIFT B, SHIFT C}']
+
+  units                  jsonb        [not null, default: `'{}'`, note: '{buildings, floors, sections}']
+  location_link          text
+
+  poc1                   jsonb        [not null, default: `'{}'`, note: '{name, phone, role}']
+  poc2                   jsonb        [not null, default: `'{}'`]
+
+  inspection_chief_email text         [note: 'logical ref to operators.email']
+  inspection_date        date
+  inspection_report_url  text
+
+  protocols              text
+  charging_setup         jsonb        [not null, default: `'{}'`, note: '{load_balancing, ports, extensions}']
+  worker_count           int
+  floor_escalations      jsonb        [not null, default: `'[]'`, note: '[{floor, name, phone}, ...]']
+  compliance_escalation  jsonb        [not null, default: `'{}'`, note: '{name, phone, scope}']
+
+  photos                 "text[]"     [not null, default: `'{}'`]
+  videos                 "text[]"     [not null, default: `'{}'`]
+  layout_asset_url       text         [note: 'SVG or image']
+
+  state                  text         [not null, default: 'ACTIVE', note: 'ACTIVE | INACTIVE']
+
+  ts                     timestamptz  [not null, default: `now()`]
+  submitted_by           text         [not null]
+
+  Indexes {
+    (factory_id, id) [name: 'factories_id_idx']
+    state            [name: 'factories_state_idx']
+  }
+
+  Note: '''
+  Pre-visit + ongoing factory data. `shift_count` constrains the allowed
+  shift names on related `operations` rows.
+  Append-only — corrections submit a new row, latest wins.
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// 3. operations — assignment of an operator to a factory + shift
+// ---------------------------------------------------------------------------
+
+Table operations {
+  id                  bigserial    [pk]
+  operation_id        text         [not null, note: 'factory_id + shift_slug + pan_hash[:12]']
+
+  factory_id          text         [not null]
+  shift               text         [not null, note: 'AM/PM/SHIFT A/SHIFT B/SHIFT C — must match factories.shift_count']
+  operator_pan_hash   text         [not null]
+
+  role                text         [not null, note: 'CHIEF | CAPTAIN | OPERATOR — what this operator does on this op']
+
+  state               text         [not null, default: 'ACTIVE', note: 'ACTIVE | INACTIVE; remove = INSERT INACTIVE']
+
+  ts                  timestamptz  [not null, default: `now()`]
+  submitted_by        text         [not null, note: 'email of chief/general doing the assignment']
+
+  Indexes {
+    (operation_id, id)            [name: 'operations_id_idx']
+    (factory_id, shift, id)       [name: 'operations_factory_idx']
+    (operator_pan_hash, id)       [name: 'operations_operator_idx']
+  }
+
+  Note: '''
+  An "operation" row is one operator deployed at one (factory, shift).
+  Multiple rows for the same (factory, shift) = the deployment roster.
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// 4. attendance — per-person attendance per shift per date
+// ---------------------------------------------------------------------------
+
+Table attendance {
+  id                  bigserial    [pk]
+
+  factory_id          text         [not null]
+  shift               text         [not null]
+  report_date         date         [not null]
+  person_pan_hash     text         [not null]
+
+  full_name           text         [not null, note: 'snapshot — UPPERCASE']
+  phone               text
+  person_role         text         [not null, note: 'CHIEF | CAPTAIN | OPERATOR']
+
+  photo_url           text         [note: 'photo proof (no geo verification — review chain handles trust)']
+
+  status              text         [not null, default: 'PENDING', note: 'PENDING | CONFIRMED | REJECTED']
+  validator_role      text         [note: 'CAPTAIN | CHIEF | GENERAL — one rank above person_role']
+  validated_by_email  text         [note: 'set on CONFIRMED / REJECTED']
+  rejection_reason    text
+
+  ts                  timestamptz  [not null, default: `now()`]
+  submitted_by        text         [not null]
+
+  Indexes {
+    (factory_id, shift, report_date, person_pan_hash, id) [name: 'attendance_key_idx']
+    report_date     [name: 'attendance_date_idx']
+    (status, ts)    [name: 'attendance_status_idx']
+  }
+
+  Note: '''
+  Approval chain (one rank up):
+  - OPERATOR → CAPTAIN
+  - CAPTAIN  → CHIEF
+  - CHIEF    → GENERAL
+
+  Status changes = new row with new ts. Latest row per
+  (factory, shift, date, person) is the canonical state.
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// 5. events — daily report numbers + ad-hoc ops events
+// ---------------------------------------------------------------------------
+
+Table events {
+  id                  bigserial    [pk]
+
+  kind                text         [not null, note: 'DAILY_REPORT | INCIDENT | NOTE | REMINDER_SENT | REMINDER_SKIPPED']
+
+  factory_id          text         [not null]
+  shift               text         [not null]
+  report_date         date         [not null]
+
+  payload             jsonb        [not null, default: `'{}'`, note: 'kind-specific body — see notes']
+
+  ts                  timestamptz  [not null, default: `now()`]
+  submitted_by        text         [not null]
+
+  Indexes {
+    (factory_id, shift, report_date, kind, id) [name: 'events_dim_idx']
+    (kind, report_date)                        [name: 'events_kind_date_idx']
+  }
+
+  Note: '''
+  Catch-all event log. payload schema by kind:
+
+  - DAILY_REPORT:    {chiefs, captains, operators, devices_deployed,
+                      devices_available, devices_lost, devices_recovered,
+                      sd_cards_used, sd_cards_left, actual_reporting_time, notes}
+  - INCIDENT:        {summary, severity, photo_url}
+  - NOTE:            {text}
+  - REMINDER_SENT:   {chief_email, channel, message_id}
+  - REMINDER_SKIPPED:{chief_email, channel, reason}
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// Logical relationships (not enforced FKs — targets aren't unique by design)
+// ---------------------------------------------------------------------------
+
+Ref: operations.operator_pan_hash > operators.pan_hash    // assignment ties to a person
+Ref: operations.factory_id        > factories.factory_id  // assignment ties to a factory
+Ref: attendance.person_pan_hash   > operators.pan_hash    // who showed up
+Ref: attendance.factory_id        > factories.factory_id  // where
+Ref: events.factory_id            > factories.factory_id  // event scope: factory
+Ref: factories.inspection_chief_email > operators.email   // who inspected the site
+
+// ---------------------------------------------------------------------------
+// Read views (not part of dbdiagram render — listed for context)
+//
+//   v_operators_current      latest row per pan_hash
+//   v_operators_active       v_operators_current WHERE op_state='ACTIVE'
+//   v_factories_current      latest row per factory_id
+//   v_factories_active       v_factories_current WHERE state='ACTIVE'
+//   v_operations_current     latest row per operation_id
+//   v_operations_active      v_operations_current WHERE state='ACTIVE'
+//   v_attendance_current     latest row per (factory, shift, date, person)
+//   v_daily_report_current   latest row per (factory, shift, date) where kind='DAILY_REPORT'
+//   v_roster                 active operators on active operations, joined to profiles
+//   v_dashboard_today        per-(factory, shift) snapshot for IST today, with
+//                            attendance counts and the latest daily report
+// ---------------------------------------------------------------------------
