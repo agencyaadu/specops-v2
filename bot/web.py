@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from datetime import date, datetime
 from html import escape as h
 from urllib.parse import urlencode
 
@@ -563,13 +564,23 @@ async def profile_save(request: web.Request) -> web.Response:
 
     form = await request.post()
 
-    updates = {}
+    updates: dict[str, object | None] = {}
     for key in EDITABLE_FIELDS:
         raw = (form.get(key) or "").strip()
+        if not raw:
+            updates[key] = None
+            continue
         if key == "dob":
-            updates[key] = raw or None
+            try:
+                updates[key] = datetime.strptime(raw, "%Y-%m-%d").date()
+            except ValueError:
+                return _layout("Save failed",
+                               f'{_topbar(session)}<h1>Invalid date</h1>'
+                               f'<p>DOB must be YYYY-MM-DD. Got <code>{h(raw)}</code>.</p>'
+                               f'<a class="btn secondary" href="/profile/{h(pan)}/edit">Back</a>',
+                               status=400)
         else:
-            updates[key] = raw or None
+            updates[key] = raw
 
     set_cols = []
     args = []
