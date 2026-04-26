@@ -46,6 +46,7 @@ class SpecOpsBot(discord.Client):
         intents = discord.Intents.default()
         intents.members = True
         intents.message_content = True
+        intents.dm_messages = True
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
@@ -54,7 +55,7 @@ class SpecOpsBot(discord.Client):
         await init_schema()
         log.info("DB ready")
 
-        onboard.register(self.tree)
+        onboard.register(self.tree, self)
         attendance.register(self.tree)
         validate.register(self.tree)
 
@@ -81,7 +82,7 @@ def main():
     token = os.environ.get("DISCORD_BOT_TOKEN")
     if not token:
         raise SystemExit("DISCORD_BOT_TOKEN not set")
-    SpecOpsBot().run(token, log_handler=None)
+    SpecOpsBot().run(token, log_handler=None)  # internal class name kept for code stability
 
 
 if __name__ == "__main__":

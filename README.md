@@ -1,6 +1,6 @@
-# SpecOps v2
+# SPEC-OPS v2
 
-Append-only rebuild of [SpecOps](https://github.com/agencyaadu/specops).
+Append-only rebuild of [SPEC-OPS](https://github.com/agencyaadu/specops).
 
 - **v1** (production): https://spec-ops.best — stays untouched.
 - **v2** (this repo): clean rebuild on a 5-table append-only schema.

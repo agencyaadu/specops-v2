@@ -1,9 +1,13 @@
-# SpecOps v2
+# SPEC-OPS v2
 
-Fresh rebuild of SpecOps on an append-only schema. v1 stays untouched at
+Fresh rebuild of SPEC-OPS on an append-only schema. v1 stays untouched at
 `/Users/croww/specops/` and in production; this repo is the clean slate.
 
-## What SpecOps is
+> **Brand:** always write `SPEC-OPS` (uppercase, hyphenated) in any
+> user-facing text. Never `Specops`, `SpecOps`, or `specops` outside of
+> filesystem paths / repo slugs / env var names.
+
+## What SPEC-OPS is
 
 A factory operations management app. Workers (operators) are deployed to
 factories in shifts. Captains and chiefs supervise. The dashboard tracks
