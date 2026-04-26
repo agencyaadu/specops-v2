@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS people (
     pan               text PRIMARY KEY,
     discord_id        text NOT NULL UNIQUE,
     discord_username  text,
+    google_id         text UNIQUE,
+    email             text,
 
     name              text NOT NULL,
     wa_number         text NOT NULL,
@@ -53,7 +55,16 @@ CREATE TABLE IF NOT EXISTS people (
     updated_at        timestamptz NOT NULL DEFAULT now()
 );
 
+-- Bring older rows in line with the current shape (must happen
+-- BEFORE any CREATE INDEX that references the new columns).
+ALTER TABLE people ADD COLUMN IF NOT EXISTS google_id text;
+ALTER TABLE people ADD COLUMN IF NOT EXISTS email     text;
+ALTER TABLE people DROP COLUMN IF EXISTS people_id;
+DROP SEQUENCE IF EXISTS people_id_seq;
+
 CREATE INDEX IF NOT EXISTS people_discord_idx ON people (discord_id);
+CREATE INDEX IF NOT EXISTS people_email_idx   ON people (email);
+CREATE UNIQUE INDEX IF NOT EXISTS people_google_id_idx ON people (google_id);
 
 CREATE TABLE IF NOT EXISTS factories (
     id            bigserial PRIMARY KEY,

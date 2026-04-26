@@ -5,6 +5,7 @@ import discord
 from discord import app_commands
 
 from db import pool
+from web_oauth import google_signin_url, is_configured as oauth_is_configured
 
 PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 WA_RE = re.compile(r"^\+?\d{7,15}$")
@@ -95,10 +96,7 @@ class OnboardModal(discord.ui.Modal, title="SPEC-OPS · Brief"):
                     """,
                     pan, name, wa, discord_username,
                 )
-                await interaction.response.send_message(
-                    f"✅ Roster updated.\n`{pan}` · {name} · {wa}",
-                    ephemeral=True,
-                )
+                msg = f"✅ Roster updated. `{pan}` · {name} · {wa}"
             else:
                 await con.execute(
                     """
@@ -107,12 +105,15 @@ class OnboardModal(discord.ui.Modal, title="SPEC-OPS · Brief"):
                     """,
                     pan, discord_id, discord_username, name, wa,
                 )
-                await interaction.response.send_message(
+                msg = (
                     f"✅ You're on the SPEC-OPS roster.\n"
                     f"`{pan}` · {name} · {wa}\n\n"
-                    f"`/clock-in` when you start your tour. Stay sharp.",
-                    ephemeral=True,
+                    f"Now tap **Sign in with Google** so you can log in to the web app later."
                 )
+            # Show the Google-link button right after submit if not already linked.
+            already_linked = await con.fetchval("SELECT google_id FROM people WHERE pan = $1", pan)
+        view = None if already_linked else GoogleLinkView(pan, discord_id)
+        await interaction.response.send_message(msg, view=view, ephemeral=True)
 
 
 class OnboardView(discord.ui.View):
@@ -122,6 +123,29 @@ class OnboardView(discord.ui.View):
     @discord.ui.button(label="Open brief", style=discord.ButtonStyle.secondary)
     async def open_form(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(OnboardModal())
+
+
+class GoogleLinkView(discord.ui.View):
+    """Posted in the ephemeral confirmation after a successful onboard.
+    Single Link-style button — opens browser straight to Google sign-in for
+    this specific (PAN, discord_id) pair."""
+    def __init__(self, pan: str, discord_id: str):
+        super().__init__(timeout=900)
+        if oauth_is_configured():
+            url = google_signin_url(pan, discord_id)
+            self.add_item(discord.ui.Button(
+                label="Sign in with Google",
+                style=discord.ButtonStyle.link,
+                url=url,
+            ))
+        else:
+            # OAuth env not set yet — disable the button with a hint.
+            disabled = discord.ui.Button(
+                label="Sign in with Google (not configured yet)",
+                style=discord.ButtonStyle.secondary,
+                disabled=True,
+            )
+            self.add_item(disabled)
 
 
 def register(tree: app_commands.CommandTree, client: discord.Client):

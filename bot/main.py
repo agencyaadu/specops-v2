@@ -33,6 +33,7 @@ if _sa_json:
 from db import init_pool, init_schema  # noqa: E402
 from commands import onboard, attendance, validate, admin  # noqa: E402
 import sheets_mirror  # noqa: E402
+import web_oauth  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -72,8 +73,9 @@ class SpecOpsBot(discord.Client):
             await self.tree.sync()
             log.info("slash commands synced globally")
 
-        # Fire and forget — runs forever in the background.
+        # Background services — both run forever inside the bot process.
         asyncio.create_task(sheets_mirror.run_loop())
+        await web_oauth.start_server()
 
     async def on_ready(self):
         log.info("logged in as %s (id=%s) — guilds=%d", self.user, self.user.id, len(self.guilds))
