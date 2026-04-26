@@ -1,0 +1,98 @@
+// SpecOps v2 — Batch 1 schema (Discord-only, onboarding + attendance)
+//
+// Two tables. Discord ID is the auth/identity; PAN is the human identity.
+// No geotag (Discord can't capture location).
+// Mutable in this batch (not append-only) — append-only triggers come later.
+//
+// Mirrors what bot/db.py creates. Paste into https://dbdiagram.io/d to render.
+
+Project specops_v2_batch1 {
+  database_type: 'PostgreSQL'
+  Note: '''
+  # SpecOps v2 — Batch 1 (Discord)
+  Bot writes to these. Sheets mirror reads from them.
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// 1. people — every operator/captain/chief in the system
+// ---------------------------------------------------------------------------
+
+Table people {
+  pan                text         [pk, note: 'plain PAN — human identifier']
+
+  discord_id         text         [not null, unique, note: 'Discord user snowflake — auth identity']
+  discord_username   text         [note: 'cached for display']
+
+  name               text         [not null, note: 'UPPERCASE on insert']
+  wa_number          text         [not null, note: 'digits + leading + only']
+
+  // Filled later — nullable on create.
+  dob                date
+  location           text
+  languages          text         [note: 'comma-joined']
+  hardest_problem    text
+  headshot_url       text
+  intro_video_url    text
+
+  bank_name          text
+  account_number     text
+  ifsc               text
+  upi_id             text
+
+  created_at         timestamptz  [not null, default: `now()`]
+  updated_at         timestamptz  [not null, default: `now()`]
+
+  Indexes {
+    discord_id [name: 'people_discord_idx']
+  }
+
+  Note: '''
+  Created from the /onboard slash command modal: pan + name + wa_number.
+  Discord identity (id + username) captured automatically from the interaction.
+  Other profile fields filled later via separate commands.
+  '''
+}
+
+// ---------------------------------------------------------------------------
+// 2. attendance — one row per clock-in (clock-out updates same row)
+// ---------------------------------------------------------------------------
+
+Table attendance {
+  at_id                bigserial    [pk]
+  pp_pan               text         [not null, ref: > people.pan]
+  pp_discord_id        text         [not null, note: 'snapshot — who clocked in']
+
+  op_id                text         [not null, note: 'free text — operations table comes later']
+  role                 text         [not null, note: 'OPERATOR | CAPTAIN | CHIEF — UPPERCASE']
+
+  clock_in_time        timestamptz  [not null, default: `now()`]
+  clock_out_time       timestamptz
+
+  photo_url            text         [note: 'Supabase Storage URL — from Discord attachment']
+
+  // Validation chain — interactive buttons in #attendance-validation channel
+  validator_discord_id text         [note: 'set on validation']
+  validation           text         [not null, default: 'PENDING', note: 'PENDING | CONFIRMED | REJECTED']
+  validated_at         timestamptz
+  rejection_reason     text
+
+  // Discord message lookup (for editing the embed in place after validation)
+  guild_id             text         [note: 'where the validation message lives']
+  validation_message_id text        [note: 'so the bot can update its own embed']
+
+  created_at           timestamptz  [not null, default: `now()`]
+
+  Indexes {
+    op_id         [name: 'attendance_op_idx']
+    pp_pan        [name: 'attendance_pp_idx']
+    pp_discord_id [name: 'attendance_pp_discord_idx']
+    validation    [name: 'attendance_status_idx']
+  }
+
+  Note: '''
+  Mutated in place: clock-out updates clock_out_time; validation updates
+  validation + validator_discord_id + validated_at. Append-only triggers
+  come in a later batch when factories + operations land.
+  '''
+}

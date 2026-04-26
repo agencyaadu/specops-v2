@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.gcp-sa.json
 
 __pycache__/
 *.pyc

@@ -1,0 +1,86 @@
+from __future__ import annotations
+import os
+import asyncpg
+
+_pool: "asyncpg.Pool | None" = None
+
+
+async def init_pool() -> asyncpg.Pool:
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(
+            os.environ["DATABASE_URL"],
+            min_size=1,
+            max_size=5,
+            statement_cache_size=0,
+        )
+    return _pool
+
+
+def pool() -> asyncpg.Pool:
+    assert _pool is not None, "db pool not initialized"
+    return _pool
+
+
+async def init_schema() -> None:
+    p = await init_pool()
+    async with p.acquire() as con:
+        await con.execute(SCHEMA_SQL)
+
+
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS people (
+    pan               text PRIMARY KEY,
+    discord_id        text NOT NULL UNIQUE,
+    discord_username  text,
+
+    name              text NOT NULL,
+    wa_number         text NOT NULL,
+
+    dob               date,
+    location          text,
+    languages         text,
+    hardest_problem   text,
+    headshot_url      text,
+    intro_video_url   text,
+
+    bank_name         text,
+    account_number    text,
+    ifsc              text,
+    upi_id            text,
+
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    updated_at        timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS people_discord_idx ON people (discord_id);
+
+CREATE TABLE IF NOT EXISTS attendance (
+    at_id                  bigserial PRIMARY KEY,
+    pp_pan                 text NOT NULL REFERENCES people (pan) ON DELETE RESTRICT,
+    pp_discord_id          text NOT NULL,
+
+    op_id                  text NOT NULL,
+    role                   text NOT NULL,
+
+    clock_in_time          timestamptz NOT NULL DEFAULT now(),
+    clock_out_time         timestamptz,
+
+    photo_url              text,
+
+    validator_discord_id   text,
+    validation             text NOT NULL DEFAULT 'PENDING',
+    validated_at           timestamptz,
+    rejection_reason       text,
+
+    guild_id               text,
+    validation_message_id  text,
+
+    created_at             timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS attendance_op_idx            ON attendance (op_id);
+CREATE INDEX IF NOT EXISTS attendance_pp_idx            ON attendance (pp_pan);
+CREATE INDEX IF NOT EXISTS attendance_pp_discord_idx    ON attendance (pp_discord_id);
+CREATE INDEX IF NOT EXISTS attendance_status_idx        ON attendance (validation);
+"""
