@@ -119,7 +119,7 @@ class OnboardView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=600)  # 10 min
 
-    @discord.ui.button(label="Open brief", style=discord.ButtonStyle.primary, emoji="📝")
+    @discord.ui.button(label="Open brief", style=discord.ButtonStyle.secondary)
     async def open_form(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(OnboardModal())
 

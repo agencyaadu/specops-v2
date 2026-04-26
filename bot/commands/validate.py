@@ -72,9 +72,9 @@ class ValidationView(discord.ui.View):
         super().__init__(timeout=None)
         self.at_id = at_id
 
-        approve = discord.ui.Button(style=discord.ButtonStyle.success, label="Approve",
+        approve = discord.ui.Button(style=discord.ButtonStyle.secondary, label="Approve",
                                     custom_id=f"att:approve:{at_id}")
-        reject  = discord.ui.Button(style=discord.ButtonStyle.danger,  label="Reject",
+        reject  = discord.ui.Button(style=discord.ButtonStyle.secondary, label="Reject",
                                     custom_id=f"att:reject:{at_id}")
         approve.callback = self._on_approve
         reject.callback  = self._on_reject
