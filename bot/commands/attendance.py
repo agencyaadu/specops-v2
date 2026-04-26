@@ -22,9 +22,9 @@ def _humanize(seconds: float) -> str:
     return f"{h}h {m}m" if h else f"{m}m"
 
 
-async def _ask_text(client: discord.Client, channel: discord.abc.Messageable, user: discord.abc.User,
-                    prompt: str, validator, error_msg: str) -> str | None:
-    await channel.send(f"{user.mention} {prompt}")
+async def _wait_text(client: discord.Client, channel: discord.abc.Messageable, user: discord.abc.User,
+                     validator, error_msg: str) -> str | None:
+    """Wait for a text reply. Caller sends the question first."""
     for _ in range(3):
         def check(msg: discord.Message) -> bool:
             return msg.author.id == user.id and msg.channel.id == channel.id
@@ -41,10 +41,9 @@ async def _ask_text(client: discord.Client, channel: discord.abc.Messageable, us
     return None
 
 
-async def _ask_photo(client: discord.Client, channel: discord.abc.Messageable, user: discord.abc.User
-                     ) -> tuple[str, str | None] | None:
-    """Returns (url, content_type) of the first image attachment, or None on timeout/skip."""
-    await channel.send(f"{user.mention} drop a sitrep photo here (image attachment).")
+async def _wait_photo(client: discord.Client, channel: discord.abc.Messageable, user: discord.abc.User
+                      ) -> tuple[str, str | None] | None:
+    """Wait for a message with an image attachment. Caller sends the prompt first."""
     for _ in range(3):
         def check(msg: discord.Message) -> bool:
             return (msg.author.id == user.id
@@ -107,30 +106,36 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
             return
 
         await interaction.response.send_message(
-            f"Brief, {user.mention}. Three quick checks, then you're on the clock."
+            f"Brief, {user.mention}.\n\n"
+            f"**1/3 · Where are you posted?**\nDrop the op ID (e.g. `mumbai-am`) below."
         )
         channel = interaction.channel
 
-        op_id = await _ask_text(
+        op_id = await _wait_text(
             client, channel, user,
-            "**1/3** · Where are you posted? (op ID — e.g. `mumbai-am`)",
             _validate_op_id,
-            "Op ID should be 1–80 chars. Try again.",
+            "op ID should be 1–80 chars. Try again.",
         )
         if op_id is None:
             return
 
-        role = await _ask_text(
+        await channel.send(
+            f"{user.mention} Copy. Posted at `{op_id}`.\n\n"
+            f"**2/3 · Role on this op?**\nType one: `OPERATOR`, `CAPTAIN`, or `CHIEF`."
+        )
+        role = await _wait_text(
             client, channel, user,
-            f"Copy. Posted at `{op_id}`. **2/3** · Role on this op? (`OPERATOR`, `CAPTAIN`, or `CHIEF`)",
             _validate_role,
-            "Use one of: OPERATOR, CAPTAIN, CHIEF.",
+            "use one of: OPERATOR, CAPTAIN, CHIEF.",
         )
         if role is None:
             return
 
-        await channel.send(f"{user.mention} **3/3** · Photo proof.")
-        photo = await _ask_photo(client, channel, user)
+        await channel.send(
+            f"{user.mention}\n\n"
+            f"**3/3 · Sitrep photo.**\nDrop an image attachment (📎 button → upload)."
+        )
+        photo = await _wait_photo(client, channel, user)
         if photo is None:
             return
 

@@ -14,10 +14,10 @@ PROMPT_TIMEOUT = 180  # per step
 ONBOARDING_CHANNEL = os.environ.get("ONBOARDING_CHANNEL", "onboarding")
 
 
-async def _ask(client: discord.Client, channel: discord.TextChannel, user: discord.abc.User,
-               prompt: str, validator, error_msg: str) -> str | None:
-    await channel.send(f"{user.mention} {prompt}")
-
+async def _wait_value(client: discord.Client, channel: discord.TextChannel, user: discord.abc.User,
+                      validator, error_msg: str) -> str | None:
+    """Wait for the user to type a reply in `channel`, validate, re-prompt up to 3 times.
+    Caller is responsible for sending the question first."""
     for _ in range(3):
         def check(msg: discord.Message) -> bool:
             return msg.author.id == user.id and msg.channel.id == channel.id
@@ -58,6 +58,7 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
     async def onboard(interaction: discord.Interaction):
         user = interaction.user
 
+        # Cheap, fast checks first — answer interaction within 3 seconds.
         if interaction.guild is None:
             await interaction.response.send_message("Run this in a server, not a DM.", ephemeral=True)
             return
@@ -77,35 +78,40 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
             )
             return
 
+        # Welcome + first prompt in ONE message — answers the interaction immediately.
         await interaction.response.send_message(
-            f"Welcome aboard, {user.mention}.\n"
-            f"SPEC-OPS runs the sharpest ops in India and you're about to join the roster. Three quick checks — "
-            f"answer each as a normal message in this channel."
+            f"Welcome aboard, {user.mention}. SPEC-OPS — sharpest ops in India.\n\n"
+            f"**1/3 · Full name?**\nType it below as a regular message."
         )
 
-        name = await _ask(
+        name = await _wait_value(
             client, target, user,
-            "**1/3** · What's your full name?",
             _validate_name,
-            "Name should be 1–200 characters. Try again.",
+            "name should be 1–200 characters. Try again.",
         )
         if name is None:
             return
 
-        pan = await _ask(
+        await target.send(
+            f"{user.mention} Copy that, **{name}**.\n\n"
+            f"**2/3 · PAN number?**\n5 letters + 4 digits + 1 letter (e.g. `ABCDE1234F`). Type it below."
+        )
+        pan = await _wait_value(
             client, target, user,
-            f"Copy that, **{name}**. **2/3** · PAN number?",
             _validate_pan,
-            "PAN format off. Expected 5 letters + 4 digits + 1 letter (e.g. `ABCDE1234F`). Try again.",
+            "PAN format off. Expected like `ABCDE1234F`. Try again.",
         )
         if pan is None:
             return
 
-        wa = await _ask(
+        await target.send(
+            f"{user.mention}\n\n"
+            f"**3/3 · WhatsApp number?**\nWith country code (e.g. `+91 98765 43210`). Type it below."
+        )
+        wa = await _wait_value(
             client, target, user,
-            "**3/3** · WhatsApp number, country code first (e.g. `+91 98765 43210`)?",
             _validate_wa,
-            "Number doesn't look right. 7–15 digits, optional leading `+`. Try again.",
+            "number doesn't look right. 7–15 digits, optional leading `+`. Try again.",
         )
         if wa is None:
             return
