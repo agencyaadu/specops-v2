@@ -55,29 +55,60 @@ CREATE TABLE IF NOT EXISTS people (
 
 CREATE INDEX IF NOT EXISTS people_discord_idx ON people (discord_id);
 
-CREATE TABLE IF NOT EXISTS attendance (
-    at_id                  bigserial PRIMARY KEY,
-    pp_pan                 text NOT NULL REFERENCES people (pan) ON DELETE RESTRICT,
-    pp_discord_id          text NOT NULL,
-
-    op_id                  text NOT NULL,
-    role                   text NOT NULL,
-
-    clock_in_time          timestamptz NOT NULL DEFAULT now(),
-    clock_out_time         timestamptz,
-
-    photo_url              text,
-
-    validator_discord_id   text,
-    validation             text NOT NULL DEFAULT 'PENDING',
-    validated_at           timestamptz,
-    rejection_reason       text,
-
-    guild_id               text,
-    validation_message_id  text,
-
-    created_at             timestamptz NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS factories (
+    id            bigserial PRIMARY KEY,
+    factory_id    text NOT NULL UNIQUE,
+    name          text NOT NULL,
+    state         text NOT NULL DEFAULT 'ACTIVE',
+    created_by    text,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    updated_at    timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS operations (
+    id              bigserial PRIMARY KEY,
+    operation_id    text NOT NULL UNIQUE,
+    factory_id      text NOT NULL REFERENCES factories (factory_id) ON DELETE RESTRICT,
+    shift           text NOT NULL,
+    op_password     text NOT NULL,
+    state           text NOT NULL DEFAULT 'ACTIVE',
+    created_by      text,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS operations_factory_idx ON operations (factory_id);
+CREATE INDEX IF NOT EXISTS operations_state_idx   ON operations (state);
+
+CREATE TABLE IF NOT EXISTS attendance (
+    at_id                          bigserial PRIMARY KEY,
+    pp_pan                         text NOT NULL REFERENCES people (pan) ON DELETE RESTRICT,
+    pp_discord_id                  text NOT NULL,
+
+    op_id                          text NOT NULL,
+    role                           text NOT NULL,
+
+    clock_in_time                  timestamptz NOT NULL DEFAULT now(),
+    clock_out_time                 timestamptz,
+
+    photo_url                      text,
+
+    selected_validator_discord_id  text,
+    validator_discord_id           text,
+    validation                     text NOT NULL DEFAULT 'PENDING',
+    validated_at                   timestamptz,
+    rejection_reason               text,
+
+    guild_id                       text,
+    validation_message_id          text,
+    thread_id                      text,
+
+    created_at                     timestamptz NOT NULL DEFAULT now()
+);
+
+-- columns added after initial release; safe to no-op if already there
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS selected_validator_discord_id text;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS thread_id text;
 
 CREATE INDEX IF NOT EXISTS attendance_op_idx            ON attendance (op_id);
 CREATE INDEX IF NOT EXISTS attendance_pp_idx            ON attendance (pp_pan);

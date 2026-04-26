@@ -19,17 +19,20 @@ def _user_role_names(member: discord.Member) -> set[str]:
 
 
 def build_pending_embed(*, at_id: int, pan: str, name: str, discord_user: discord.User,
-                        op_id: str, role: str, clock_in_time: datetime, photo_url: str | None) -> discord.Embed:
+                        op_id: str, role: str, clock_in_time: datetime, photo_url: str | None,
+                        validator: discord.abc.User | None = None) -> discord.Embed:
     e = discord.Embed(
-        title=f"Attendance · at_id {at_id}",
+        title=f"SPEC-OPS · at_id {at_id}",
         description=f"**{name}** · `{pan}`",
-        color=discord.Color.orange(),
+        color=discord.Color.from_rgb(80, 80, 80),
         timestamp=clock_in_time,
     )
-    e.add_field(name="Discord", value=discord_user.mention, inline=True)
+    e.add_field(name="Operator", value=discord_user.mention, inline=True)
     e.add_field(name="Op", value=f"`{op_id}`", inline=True)
     e.add_field(name="Role", value=role, inline=True)
-    e.add_field(name="Status", value="🟠 PENDING", inline=False)
+    if validator is not None:
+        e.add_field(name="Validator", value=validator.mention, inline=True)
+    e.add_field(name="Status", value="PENDING", inline=False)
     if photo_url:
         e.set_image(url=photo_url)
     e.set_footer(text="Clock-in")
@@ -84,7 +87,12 @@ class ValidationView(discord.ui.View):
     async def _check_permission(self, interaction: discord.Interaction) -> tuple[bool, str | None]:
         async with pool().acquire() as con:
             row = await con.fetchrow(
-                "SELECT role, validation, pp_discord_id FROM attendance WHERE at_id = $1", self.at_id,
+                """
+                SELECT role, validation, pp_discord_id, selected_validator_discord_id
+                  FROM attendance
+                 WHERE at_id = $1
+                """,
+                self.at_id,
             )
         if not row:
             return False, "Attendance row not found."
@@ -93,12 +101,18 @@ class ValidationView(discord.ui.View):
         if str(interaction.user.id) == row["pp_discord_id"]:
             return False, "You can't validate your own attendance."
 
-        if not isinstance(interaction.user, discord.Member):
-            return False, "This control only works inside a server."
+        # If the operator picked a specific validator, only that user can act.
+        sel = row["selected_validator_discord_id"]
+        if sel and str(interaction.user.id) != sel:
+            return False, "Only the validator the operator picked can act on this."
 
-        allowed = VALIDATOR_FOR.get(row["role"], set())
-        if not (_user_role_names(interaction.user) & allowed):
-            return False, f"Need one of these roles to validate a {row['role']}: {', '.join(sorted(allowed))}."
+        # Fallback: legacy rows without selected validator — fall back to role-based check.
+        if not sel:
+            if not isinstance(interaction.user, discord.Member):
+                return False, "This control only works inside a server."
+            allowed = VALIDATOR_FOR.get(row["role"], set())
+            if not (_user_role_names(interaction.user) & allowed):
+                return False, f"Need one of these roles to validate a {row['role']}: {', '.join(sorted(allowed))}."
         return True, None
 
     async def _on_approve(self, interaction: discord.Interaction):

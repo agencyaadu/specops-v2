@@ -31,7 +31,7 @@ if _sa_json:
     os.environ["GOOGLE_SERVICE_ACCOUNT_FILE"] = _sa_path
 
 from db import init_pool, init_schema  # noqa: E402
-from commands import onboard, attendance, validate  # noqa: E402
+from commands import onboard, attendance, validate, admin  # noqa: E402
 import sheets_mirror  # noqa: E402
 
 logging.basicConfig(
@@ -58,6 +58,7 @@ class SpecOpsBot(discord.Client):
         onboard.register(self.tree, self)
         attendance.register(self.tree, self)
         validate.register(self.tree)
+        admin.register(self.tree, self)
 
         # Global sync; takes ~minutes to propagate. For instant testing,
         # set GUILD_ID to copy_global_to + sync per-guild.
