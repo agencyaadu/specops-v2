@@ -22,6 +22,14 @@ from discord import app_commands
 # Make `bot/` importable when running `python bot/main.py`.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# If GOOGLE_SERVICE_ACCOUNT_JSON is set (e.g. on Railway), materialise it
+# into a file and point GOOGLE_SERVICE_ACCOUNT_FILE at it.
+_sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+if _sa_json:
+    _sa_path = "/tmp/gcp-sa.json"
+    Path(_sa_path).write_text(_sa_json)
+    os.environ["GOOGLE_SERVICE_ACCOUNT_FILE"] = _sa_path
+
 from db import init_pool, init_schema  # noqa: E402
 from commands import onboard, attendance, validate  # noqa: E402
 import sheets_mirror  # noqa: E402
