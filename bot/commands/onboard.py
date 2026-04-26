@@ -1,7 +1,6 @@
 from __future__ import annotations
 import os
 import re
-import asyncio
 import discord
 from discord import app_commands
 
@@ -10,57 +9,128 @@ from db import pool
 PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 WA_RE = re.compile(r"^\+?\d{7,15}$")
 
-PROMPT_TIMEOUT = 180  # per step
 ONBOARDING_CHANNEL = os.environ.get("ONBOARDING_CHANNEL", "onboarding")
 
 
-async def _wait_value(client: discord.Client, channel: discord.TextChannel, user: discord.abc.User,
-                      validator, error_msg: str) -> str | None:
-    """Wait for the user to type a reply in `channel`, validate, re-prompt up to 3 times.
-    Caller is responsible for sending the question first."""
-    for _ in range(3):
-        def check(msg: discord.Message) -> bool:
-            return msg.author.id == user.id and msg.channel.id == channel.id
+class OnboardModal(discord.ui.Modal, title="SPEC-OPS · Brief"):
+    full_name = discord.ui.TextInput(
+        label="Full Name",
+        placeholder="JANE DOE",
+        max_length=200,
+        required=True,
+    )
+    pan = discord.ui.TextInput(
+        label="PAN Number",
+        placeholder="ABCDE1234F",
+        min_length=10,
+        max_length=10,
+        required=True,
+    )
+    wa_number = discord.ui.TextInput(
+        label="WhatsApp Number (with country code)",
+        placeholder="+91 98765 43210",
+        max_length=20,
+        required=True,
+    )
 
-        try:
-            msg = await client.wait_for("message", check=check, timeout=PROMPT_TIMEOUT)
-        except asyncio.TimeoutError:
-            await channel.send(f"{user.mention} stood down (timed out). Run `/onboard` to retry.")
-            return None
+    async def on_submit(self, interaction: discord.Interaction):
+        name_raw = self.full_name.value.strip()
+        pan_raw = self.pan.value.strip().upper().replace(" ", "")
+        wa_raw = re.sub(r"[^\d+]", "", self.wa_number.value.strip())
 
-        cleaned = validator(msg.content.strip())
-        if cleaned is not None:
-            return cleaned
+        if not name_raw or len(name_raw) > 200:
+            await interaction.response.send_message(
+                "❌ Name should be 1–200 characters.",
+                ephemeral=True,
+            )
+            return
+        if not PAN_RE.match(pan_raw):
+            await interaction.response.send_message(
+                "❌ PAN format off. Expected 5 letters + 4 digits + 1 letter (e.g. `ABCDE1234F`).",
+                ephemeral=True,
+            )
+            return
+        if not WA_RE.match(wa_raw):
+            await interaction.response.send_message(
+                "❌ WhatsApp number invalid. 7–15 digits, optional leading `+`.",
+                ephemeral=True,
+            )
+            return
 
-        await channel.send(f"{user.mention} {error_msg}")
+        name = name_raw.upper()
+        pan = pan_raw
+        wa = wa_raw
 
-    await channel.send(f"{user.mention} too many retries. Restart with `/onboard`.")
-    return None
+        discord_id = str(interaction.user.id)
+        discord_username = interaction.user.name
+
+        async with pool().acquire() as con:
+            existing_pan = await con.fetchval(
+                "SELECT pan FROM people WHERE discord_id = $1", discord_id,
+            )
+            if existing_pan and existing_pan != pan:
+                await interaction.response.send_message(
+                    f"⚠️ This Discord is already on the roster as `{existing_pan}`. "
+                    "Talk to command if this is a new PAN.",
+                    ephemeral=True,
+                )
+                return
+
+            pan_owner = await con.fetchval(
+                "SELECT discord_id FROM people WHERE pan = $1", pan,
+            )
+            if pan_owner and pan_owner != discord_id:
+                await interaction.response.send_message(
+                    "⚠️ That PAN is already on the roster under another account. Talk to command.",
+                    ephemeral=True,
+                )
+                return
+
+            if existing_pan == pan:
+                await con.execute(
+                    """
+                    UPDATE people
+                       SET name = $2, wa_number = $3, discord_username = $4, updated_at = now()
+                     WHERE pan = $1
+                    """,
+                    pan, name, wa, discord_username,
+                )
+                await interaction.response.send_message(
+                    f"✅ Roster updated.\n`{pan}` · {name} · {wa}",
+                    ephemeral=True,
+                )
+            else:
+                await con.execute(
+                    """
+                    INSERT INTO people (pan, discord_id, discord_username, name, wa_number)
+                    VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    pan, discord_id, discord_username, name, wa,
+                )
+                await interaction.response.send_message(
+                    f"✅ You're on the SPEC-OPS roster.\n"
+                    f"`{pan}` · {name} · {wa}\n\n"
+                    f"`/clock-in` when you start your tour. Stay sharp.",
+                    ephemeral=True,
+                )
 
 
-def _validate_name(s: str) -> str | None:
-    s = s.strip()
-    return s.upper() if s and len(s) <= 200 else None
+class OnboardView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=600)  # 10 min
 
-
-def _validate_pan(s: str) -> str | None:
-    s = s.strip().upper().replace(" ", "")
-    return s if PAN_RE.match(s) else None
-
-
-def _validate_wa(s: str) -> str | None:
-    s = re.sub(r"[^\d+]", "", s.strip())
-    return s if WA_RE.match(s) else None
+    @discord.ui.button(label="Open brief", style=discord.ButtonStyle.primary, emoji="📝")
+    async def open_form(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(OnboardModal())
 
 
 def register(tree: app_commands.CommandTree, client: discord.Client):
-    @tree.command(name="onboard", description="Get on the SPEC-OPS roster (in #onboarding).")
+    @tree.command(name="onboard", description="Get on the SPEC-OPS roster.")
     async def onboard(interaction: discord.Interaction):
-        user = interaction.user
-
-        # Cheap, fast checks first — answer interaction within 3 seconds.
         if interaction.guild is None:
-            await interaction.response.send_message("Run this in a server, not a DM.", ephemeral=True)
+            await interaction.response.send_message(
+                "Run this in a server, not a DM.", ephemeral=True,
+            )
             return
 
         target = discord.utils.get(interaction.guild.text_channels, name=ONBOARDING_CHANNEL)
@@ -78,87 +148,8 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
             )
             return
 
-        # Welcome + first prompt in ONE message — answers the interaction immediately.
         await interaction.response.send_message(
-            f"Welcome aboard, {user.mention}. SPEC-OPS — sharpest ops in India.\n\n"
-            f"**1/3 · Full name?**\nType it below as a regular message."
+            f"Welcome aboard, {interaction.user.mention}. SPEC-OPS — sharpest ops in India.\n"
+            f"Tap **Open brief** to file your details (name, PAN, WhatsApp). Takes 30 seconds.",
+            view=OnboardView(),
         )
-
-        name = await _wait_value(
-            client, target, user,
-            _validate_name,
-            "name should be 1–200 characters. Try again.",
-        )
-        if name is None:
-            return
-
-        await target.send(
-            f"{user.mention} Copy that, **{name}**.\n\n"
-            f"**2/3 · PAN number?**\n5 letters + 4 digits + 1 letter (e.g. `ABCDE1234F`). Type it below."
-        )
-        pan = await _wait_value(
-            client, target, user,
-            _validate_pan,
-            "PAN format off. Expected like `ABCDE1234F`. Try again.",
-        )
-        if pan is None:
-            return
-
-        await target.send(
-            f"{user.mention}\n\n"
-            f"**3/3 · WhatsApp number?**\nWith country code (e.g. `+91 98765 43210`). Type it below."
-        )
-        wa = await _wait_value(
-            client, target, user,
-            _validate_wa,
-            "number doesn't look right. 7–15 digits, optional leading `+`. Try again.",
-        )
-        if wa is None:
-            return
-
-        discord_id = str(user.id)
-        discord_username = user.name
-
-        async with pool().acquire() as con:
-            existing_pan = await con.fetchval("SELECT pan FROM people WHERE discord_id = $1", discord_id)
-            if existing_pan and existing_pan != pan:
-                await target.send(
-                    f"{user.mention} this Discord is already on the roster as `{existing_pan}`. "
-                    "Talk to command if this is a new PAN."
-                )
-                return
-
-            pan_owner = await con.fetchval("SELECT discord_id FROM people WHERE pan = $1", pan)
-            if pan_owner and pan_owner != discord_id:
-                await target.send(
-                    f"{user.mention} that PAN is already on the roster under another account. "
-                    "Talk to command."
-                )
-                return
-
-            if existing_pan == pan:
-                await con.execute(
-                    """
-                    UPDATE people
-                       SET name = $2, wa_number = $3, discord_username = $4, updated_at = now()
-                     WHERE pan = $1
-                    """,
-                    pan, name, wa, discord_username,
-                )
-                await target.send(
-                    f"✅ Roster updated, {user.mention}.\n"
-                    f"`{pan}` · {name} · {wa}"
-                )
-            else:
-                await con.execute(
-                    """
-                    INSERT INTO people (pan, discord_id, discord_username, name, wa_number)
-                    VALUES ($1, $2, $3, $4, $5)
-                    """,
-                    pan, discord_id, discord_username, name, wa,
-                )
-                await target.send(
-                    f"✅ {user.mention} you're on the SPEC-OPS roster.\n"
-                    f"`{pan}` · {name} · {wa}\n\n"
-                    f"`/clock-in` when you start your tour. Stay sharp."
-                )
