@@ -175,18 +175,26 @@ async def google_callback(request: web.Request) -> web.Response:
             ok=False,
         )
 
+    profile_url = f"{_public_base()}/profile/{pan}"
     return _result_html(
-        "Linked",
+        "Onboarding complete",
         f"Welcome, <strong>{result['name']}</strong>. Your Google account "
-        f"(<code>{email}</code>) is now linked to PAN <code>{pan}</code>. "
-        "You can close this tab.",
+        f"(<code>{email}</code>) is linked to PAN <code>{pan}</code>.<br><br>"
+        f'Update the rest of your profile (DOB, bank, headshot, intro video, etc.) '
+        f'<a href="/profile/{pan}" style="color:#4ade80">on your profile page</a>.',
         ok=True,
+        primary_action=("Open my profile", f"/profile/{pan}"),
     )
 
 
-def _result_html(title: str, body_html: str, *, ok: bool) -> web.Response:
+def _result_html(title: str, body_html: str, *, ok: bool,
+                 primary_action: tuple[str, str] | None = None) -> web.Response:
     accent = "#4ade80" if ok else "#ff5757"
     icon = "✓" if ok else "✕"
+    cta_html = ""
+    if primary_action:
+        label, href = primary_action
+        cta_html = f'<a class="cta" href="{href}">{label} →</a>'
     html = f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -208,10 +216,14 @@ def _result_html(title: str, body_html: str, *, ok: bool) -> web.Response:
     margin-bottom: 16px;
   }}
   h1 {{ font-size: 22px; margin: 0 0 8px; letter-spacing: -0.02em; }}
-  p {{ color: #aaa; margin: 0; }}
+  p {{ color: #aaa; margin: 0 0 20px; }}
   code {{ background: #1c1c1c; padding: 1px 6px; }}
   .brand {{ font-size: 11px; color: #555; text-transform: uppercase;
     letter-spacing: 0.12em; margin-bottom: 12px; }}
+  a.cta {{
+    display: inline-block; padding: 10px 16px; background: #f5f5f5;
+    color: #000; text-decoration: none; font-weight: 600;
+  }}
 </style>
 </head><body>
   <div class="card">
@@ -219,10 +231,95 @@ def _result_html(title: str, body_html: str, *, ok: bool) -> web.Response:
     <div class="icon">{icon}</div>
     <h1>{title}</h1>
     <p>{body_html}</p>
+    {cta_html}
   </div>
 </body></html>"""
     return web.Response(text=html, content_type="text/html",
                         status=200 if ok else 400)
+
+
+# ─── Profile page ────────────────────────────────────────────────────────────
+
+PROFILE_FIELDS = [
+    ("Name", "name", False),
+    ("PAN", "pan", False),
+    ("WhatsApp", "wa_number", False),
+    ("Email (Google)", "email", False),
+    ("DOB", "dob", True),
+    ("Location", "location", True),
+    ("Languages", "languages", True),
+    ("Hardest problem solved", "hardest_problem", True),
+    ("Headshot", "headshot_url", True),
+    ("Intro video", "intro_video_url", True),
+    ("Bank name", "bank_name", True),
+    ("Account number", "account_number", True),
+    ("IFSC", "ifsc", True),
+    ("UPI ID", "upi_id", True),
+]
+
+
+async def profile_view(request: web.Request) -> web.Response:
+    pan = request.match_info.get("pan", "").strip().upper()
+    async with pool().acquire() as con:
+        row = await con.fetchrow("SELECT * FROM people WHERE pan = $1", pan)
+    if not row:
+        return _result_html(
+            "Profile not found",
+            f"No SPEC-OPS profile for PAN <code>{pan}</code>. "
+            "Run <code>/onboard</code> in Discord first.",
+            ok=False,
+        )
+
+    rows_html = []
+    for label, key, fillable in PROFILE_FIELDS:
+        val = row.get(key) if hasattr(row, "get") else row[key]
+        val_str = str(val) if val not in (None, "") else "—"
+        if fillable and val in (None, ""):
+            val_str = '<span style="color:#666">—</span>'
+        elif key in ("account_number",) and val:
+            val_str = "•" * 4 + str(val)[-4:]
+        rows_html.append(
+            f'<tr><td>{label}</td><td>{val_str}</td></tr>'
+        )
+    rows_str = "\n".join(rows_html)
+
+    html = f"""<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SPEC-OPS · Profile · {row['name']}</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  body {{
+    margin: 0; padding: 40px 20px;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #0c0c0c; color: #f5f5f5;
+  }}
+  .wrap {{ max-width: 640px; margin: 0 auto; }}
+  .brand {{ font-size: 11px; color: #555; text-transform: uppercase;
+    letter-spacing: 0.12em; margin-bottom: 12px; }}
+  h1 {{ font-size: 28px; margin: 0 0 4px; letter-spacing: -0.02em; }}
+  .sub {{ color: #888; margin: 0 0 24px; font-size: 13px; }}
+  table {{ border-collapse: collapse; width: 100%; }}
+  td {{ padding: 12px 0; border-bottom: 1px solid #1c1c1c; }}
+  td:first-child {{ color: #888; font-size: 12px; text-transform: uppercase;
+    letter-spacing: 0.08em; width: 40%; vertical-align: top; }}
+  td:last-child {{ color: #f5f5f5; }}
+  .note {{ margin-top: 24px; padding: 12px; border: 1px solid #222;
+    color: #888; font-size: 13px; }}
+</style>
+</head><body>
+  <div class="wrap">
+    <div class="brand">SPEC-OPS</div>
+    <h1>{row['name']}</h1>
+    <p class="sub"><code>{row['pan']}</code> · joined {row['created_at'].strftime('%d %b %Y')}</p>
+    <table>{rows_str}</table>
+    <div class="note">
+      Update form coming soon. For now, fields marked — will be filled in via the upcoming web profile form.
+    </div>
+  </div>
+</body></html>"""
+    return web.Response(text=html, content_type="text/html")
 
 
 # ─── App + lifecycle ─────────────────────────────────────────────────────────
@@ -232,6 +329,7 @@ def make_app() -> web.Application:
     app.router.add_get("/health", health)
     app.router.add_get("/google/start", google_start)
     app.router.add_get("/google/callback", google_callback)
+    app.router.add_get("/profile/{pan}", profile_view)
     return app
 
 
