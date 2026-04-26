@@ -1,5 +1,7 @@
 from __future__ import annotations
+import asyncio
 import os
+import re
 from datetime import datetime, timezone
 import discord
 from discord import app_commands
@@ -9,12 +11,70 @@ from storage import upload_attachment
 from commands.validate import build_validation_view, build_pending_embed
 
 VALIDATION_CHANNEL = os.environ.get("ATTENDANCE_VALIDATION_CHANNEL", "attendance-validation")
+PROMPT_TIMEOUT = 180
+
+VALID_ROLES = {"OPERATOR", "CAPTAIN", "CHIEF"}
 
 
-def _humanize(delta_seconds: float) -> str:
-    h, rem = divmod(int(delta_seconds), 3600)
+def _humanize(seconds: float) -> str:
+    h, rem = divmod(int(seconds), 3600)
     m = rem // 60
     return f"{h}h {m}m" if h else f"{m}m"
+
+
+async def _ask_text(client: discord.Client, channel: discord.abc.Messageable, user: discord.abc.User,
+                    prompt: str, validator, error_msg: str) -> str | None:
+    await channel.send(f"{user.mention} {prompt}")
+    for _ in range(3):
+        def check(msg: discord.Message) -> bool:
+            return msg.author.id == user.id and msg.channel.id == channel.id
+        try:
+            msg = await client.wait_for("message", check=check, timeout=PROMPT_TIMEOUT)
+        except asyncio.TimeoutError:
+            await channel.send(f"{user.mention} stood down (timed out). Run `/clock-in` to retry.")
+            return None
+        cleaned = validator(msg.content.strip())
+        if cleaned is not None:
+            return cleaned
+        await channel.send(f"{user.mention} {error_msg}")
+    await channel.send(f"{user.mention} too many retries. Restart with `/clock-in`.")
+    return None
+
+
+async def _ask_photo(client: discord.Client, channel: discord.abc.Messageable, user: discord.abc.User
+                     ) -> tuple[str, str | None] | None:
+    """Returns (url, content_type) of the first image attachment, or None on timeout/skip."""
+    await channel.send(f"{user.mention} drop a sitrep photo here (image attachment).")
+    for _ in range(3):
+        def check(msg: discord.Message) -> bool:
+            return (msg.author.id == user.id
+                    and msg.channel.id == channel.id
+                    and bool(msg.attachments))
+        try:
+            msg = await client.wait_for("message", check=check, timeout=PROMPT_TIMEOUT)
+        except asyncio.TimeoutError:
+            await channel.send(f"{user.mention} stood down (no photo received).")
+            return None
+
+        att = msg.attachments[0]
+        if not (att.content_type or "").startswith("image/"):
+            await channel.send(f"{user.mention} that's not an image. Try again.")
+            continue
+        return att.url, att.content_type
+    await channel.send(f"{user.mention} too many retries. Restart with `/clock-in`.")
+    return None
+
+
+def _validate_op_id(s: str) -> str | None:
+    s = s.strip()
+    if not s or len(s) > 80:
+        return None
+    return re.sub(r"\s+", "-", s)
+
+
+def _validate_role(s: str) -> str | None:
+    s = s.strip().upper()
+    return s if s in VALID_ROLES else None
 
 
 async def _post_to_validation_channel(guild: discord.Guild, embed: discord.Embed, view: discord.ui.View):
@@ -22,47 +82,62 @@ async def _post_to_validation_channel(guild: discord.Guild, embed: discord.Embed
     if channel is None:
         return None
     try:
-        msg = await channel.send(embed=embed, view=view)
-        return msg
+        return await channel.send(embed=embed, view=view)
     except discord.Forbidden:
         return None
 
 
-def register(tree: app_commands.CommandTree):
-    @tree.command(name="clock-in", description="Clock in for a shift (attach a photo).")
-    @app_commands.describe(
-        op_id="Op identifier (e.g. factoryslug-am)",
-        role="Your role on this op",
-        photo="Selfie or work-area photo proof",
-    )
-    @app_commands.choices(role=[
-        app_commands.Choice(name="OPERATOR", value="OPERATOR"),
-        app_commands.Choice(name="CAPTAIN", value="CAPTAIN"),
-        app_commands.Choice(name="CHIEF", value="CHIEF"),
-    ])
-    async def clock_in(
-        interaction: discord.Interaction,
-        op_id: str,
-        role: app_commands.Choice[str],
-        photo: discord.Attachment,
-    ):
-        await interaction.response.defer(ephemeral=True, thinking=True)
+def register(tree: app_commands.CommandTree, client: discord.Client):
 
-        discord_id = str(interaction.user.id)
+    @tree.command(name="clock-in", description="Start your tour. Conversational — answer in this channel.")
+    async def clock_in(interaction: discord.Interaction):
+        user = interaction.user
+        if interaction.guild is None or interaction.channel is None:
+            await interaction.response.send_message("Run this in a server channel.", ephemeral=True)
+            return
+
+        discord_id = str(user.id)
         async with pool().acquire() as con:
             person = await con.fetchrow("SELECT pan, name FROM people WHERE discord_id = $1", discord_id)
         if not person:
-            await interaction.followup.send("❌ Run `/onboard` first to create your profile.", ephemeral=True)
+            await interaction.response.send_message(
+                "Not on the roster yet. Run `/onboard` first.",
+                ephemeral=True,
+            )
             return
 
-        if not (photo.content_type or "").startswith("image/"):
-            await interaction.followup.send("❌ Photo must be an image.", ephemeral=True)
+        await interaction.response.send_message(
+            f"Brief, {user.mention}. Three quick checks, then you're on the clock."
+        )
+        channel = interaction.channel
+
+        op_id = await _ask_text(
+            client, channel, user,
+            "**1/3** · Where are you posted? (op ID — e.g. `mumbai-am`)",
+            _validate_op_id,
+            "Op ID should be 1–80 chars. Try again.",
+        )
+        if op_id is None:
+            return
+
+        role = await _ask_text(
+            client, channel, user,
+            f"Copy. Posted at `{op_id}`. **2/3** · Role on this op? (`OPERATOR`, `CAPTAIN`, or `CHIEF`)",
+            _validate_role,
+            "Use one of: OPERATOR, CAPTAIN, CHIEF.",
+        )
+        if role is None:
+            return
+
+        await channel.send(f"{user.mention} **3/3** · Photo proof.")
+        photo = await _ask_photo(client, channel, user)
+        if photo is None:
             return
 
         try:
-            photo_url = await upload_attachment(photo.url, photo.content_type)
+            photo_url = await upload_attachment(photo[0], photo[1])
         except Exception as e:
-            await interaction.followup.send(f"❌ Photo upload failed: {e}", ephemeral=True)
+            await channel.send(f"{user.mention} photo upload failed: `{e}`. Restart with `/clock-in`.")
             return
 
         async with pool().acquire() as con:
@@ -72,34 +147,33 @@ def register(tree: app_commands.CommandTree):
                 VALUES ($1, $2, $3, $4, $5, $6)
                 RETURNING at_id, clock_in_time
                 """,
-                person["pan"], discord_id, op_id.strip(), role.value, photo_url,
-                str(interaction.guild_id) if interaction.guild_id else None,
+                person["pan"], discord_id, op_id, role, photo_url,
+                str(interaction.guild_id),
             )
 
-        if interaction.guild is not None:
-            embed = build_pending_embed(
-                at_id=row["at_id"], pan=person["pan"], name=person["name"],
-                discord_user=interaction.user, op_id=op_id.strip(), role=role.value,
-                clock_in_time=row["clock_in_time"], photo_url=photo_url,
-            )
-            view = build_validation_view(row["at_id"])
-            msg = await _post_to_validation_channel(interaction.guild, embed, view)
-            if msg is not None:
-                async with pool().acquire() as con:
-                    await con.execute(
-                        "UPDATE attendance SET validation_message_id = $2 WHERE at_id = $1",
-                        row["at_id"], str(msg.id),
-                    )
+        embed = build_pending_embed(
+            at_id=row["at_id"], pan=person["pan"], name=person["name"],
+            discord_user=user, op_id=op_id, role=role,
+            clock_in_time=row["clock_in_time"], photo_url=photo_url,
+        )
+        view = build_validation_view(row["at_id"])
+        msg = await _post_to_validation_channel(interaction.guild, embed, view)
+        if msg is not None:
+            async with pool().acquire() as con:
+                await con.execute(
+                    "UPDATE attendance SET validation_message_id = $2 WHERE at_id = $1",
+                    row["at_id"], str(msg.id),
+                )
 
-        await interaction.followup.send(
-            f"✅ Clocked in. `at_id={row['at_id']}` · op `{op_id}` · role `{role.value}`. Posted for validation.",
-            ephemeral=True,
+        await channel.send(
+            f"✅ {user.mention} on the clock. `at_id={row['at_id']}` · `{op_id}` · {role}.\n"
+            f"Awaiting confirmation by command. `/clock-out` when your tour ends."
         )
 
-    @tree.command(name="clock-out", description="Clock out of your current open shift.")
+    @tree.command(name="clock-out", description="Stand down from your current tour.")
     async def clock_out(interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        discord_id = str(interaction.user.id)
+        user = interaction.user
+        discord_id = str(user.id)
 
         async with pool().acquire() as con:
             row = await con.fetchrow(
@@ -117,11 +191,13 @@ def register(tree: app_commands.CommandTree):
             )
 
         if not row:
-            await interaction.followup.send("❌ No open clock-in found. Did you `/clock-in` first?", ephemeral=True)
+            await interaction.response.send_message(
+                "No open tour found. Run `/clock-in` to start one.",
+                ephemeral=True,
+            )
             return
 
         elapsed = (row["clock_out_time"] - row["clock_in_time"]).total_seconds()
-        await interaction.followup.send(
-            f"✅ Clocked out. `at_id={row['at_id']}` · worked {_humanize(elapsed)}.",
-            ephemeral=True,
+        await interaction.response.send_message(
+            f"✅ Stood down. `at_id={row['at_id']}` · {_humanize(elapsed)} on the books. Good work."
         )

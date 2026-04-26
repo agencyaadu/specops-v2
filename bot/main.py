@@ -56,7 +56,7 @@ class SpecOpsBot(discord.Client):
         log.info("DB ready")
 
         onboard.register(self.tree, self)
-        attendance.register(self.tree)
+        attendance.register(self.tree, self)
         validate.register(self.tree)
 
         # Global sync; takes ~minutes to propagate. For instant testing,
