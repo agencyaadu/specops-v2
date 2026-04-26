@@ -5,7 +5,7 @@ import discord
 from discord import app_commands
 
 from db import pool
-from web_oauth import google_signin_url, is_configured as oauth_is_configured
+from web import google_signin_url, is_configured as oauth_is_configured
 
 PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 WA_RE = re.compile(r"^\+?\d{7,15}$")
