@@ -42,14 +42,19 @@ def _validate_role(s: str) -> str | None:
     return s if s in VALID_ROLES else None
 
 
-async def _post_to_validation_channel(guild: discord.Guild, embed: discord.Embed, view: discord.ui.View):
+async def _post_to_validation_channel(guild: discord.Guild, embed: discord.Embed, view: discord.ui.View
+                                      ) -> tuple[discord.Message | None, str | None]:
+    """Returns (message, error_string). error_string is None on success."""
     channel = discord.utils.get(guild.text_channels, name=VALIDATION_CHANNEL)
     if channel is None:
-        return None
+        return None, f"no `#{VALIDATION_CHANNEL}` channel in this server"
     try:
-        return await channel.send(embed=embed, view=view)
+        msg = await channel.send(embed=embed, view=view)
+        return msg, None
     except discord.Forbidden:
-        return None
+        return None, f"FREDDY has no access to `#{VALIDATION_CHANNEL}` — give the bot View + Send permissions there"
+    except Exception as e:
+        return None, f"posting to `#{VALIDATION_CHANNEL}` failed: `{e}`"
 
 
 # ─── Clock-in: single-shot slash command (op_id + role + photo inline) ───────
@@ -165,7 +170,7 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
             clock_in_time=row["clock_in_time"], photo_url=photo_url,
         )
         view = build_validation_view(row["at_id"])
-        vm = await _post_to_validation_channel(interaction.guild, embed, view)
+        vm, post_err = await _post_to_validation_channel(interaction.guild, embed, view)
         if vm is not None:
             async with pool().acquire() as con:
                 await con.execute(
@@ -173,11 +178,14 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
                     row["at_id"], str(vm.id),
                 )
 
-        await interaction.followup.send(
+        confirm = (
             f"✅ On the clock. `at_id={row['at_id']}` · `{op_id_clean}` · {role.value}.\n"
-            f"Awaiting confirmation by command. `/clock-out` when your tour ends.",
-            ephemeral=True,
         )
+        if post_err:
+            confirm += f"⚠️ Couldn't post for validation: {post_err}."
+        else:
+            confirm += "Awaiting confirmation by command. `/clock-out` when your tour ends."
+        await interaction.followup.send(confirm, ephemeral=True)
 
     @tree.command(name="clock-out", description="Close your current tour.")
     async def clock_out(interaction: discord.Interaction):
