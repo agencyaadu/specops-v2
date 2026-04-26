@@ -52,122 +52,7 @@ async def _post_to_validation_channel(guild: discord.Guild, embed: discord.Embed
         return None
 
 
-# ─── Clock-in: button → modal → photo prompt ─────────────────────────────────
-
-class ClockInModal(discord.ui.Modal, title="SPEC-OPS · Clock in"):
-    op_id_field = discord.ui.TextInput(
-        label="Op ID (where you're posted)",
-        placeholder="mumbai-am",
-        max_length=80,
-        required=True,
-    )
-    role_field = discord.ui.TextInput(
-        label="Role (OPERATOR / CAPTAIN / CHIEF)",
-        placeholder="OPERATOR",
-        max_length=20,
-        required=True,
-    )
-
-    def __init__(self, client: discord.Client, person_pan: str, person_name: str):
-        super().__init__()
-        self.client = client
-        self.pan = person_pan
-        self.name = person_name
-
-    async def on_submit(self, interaction: discord.Interaction):
-        op_id = _validate_op_id(self.op_id_field.value)
-        if op_id is None:
-            await interaction.response.send_message(
-                "❌ Op ID should be 1–80 chars. Try again with `/clock-in`.",
-                ephemeral=True,
-            )
-            return
-
-        role = _validate_role(self.role_field.value)
-        if role is None:
-            await interaction.response.send_message(
-                "❌ Role must be `OPERATOR`, `CAPTAIN`, or `CHIEF`. Try again with `/clock-in`.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.response.send_message(
-            f"Copy. `{op_id}` · {role}.\n\n"
-            f"**Drop a sitrep photo** in this channel (📎 → upload). Waiting up to 3 minutes.",
-            ephemeral=True,
-        )
-
-        # Wait for photo in the same channel.
-        channel = interaction.channel
-        user = interaction.user
-
-        def check(msg: discord.Message) -> bool:
-            return (msg.author.id == user.id
-                    and msg.channel.id == channel.id
-                    and bool(msg.attachments)
-                    and any(_is_image_attachment(a) for a in msg.attachments))
-
-        try:
-            msg = await self.client.wait_for("message", check=check, timeout=PHOTO_TIMEOUT)
-        except asyncio.TimeoutError:
-            await interaction.followup.send(
-                "⏳ No photo received. Run `/clock-in` again.",
-                ephemeral=True,
-            )
-            return
-
-        att = next((a for a in msg.attachments if _is_image_attachment(a)), msg.attachments[0])
-        try:
-            photo_url = await upload_attachment(att.url, att.content_type or "image/jpeg")
-        except Exception as e:
-            await interaction.followup.send(
-                f"❌ Photo upload failed: `{e}`. Run `/clock-in` again.",
-                ephemeral=True,
-            )
-            return
-
-        async with pool().acquire() as con:
-            row = await con.fetchrow(
-                """
-                INSERT INTO attendance (pp_pan, pp_discord_id, op_id, role, photo_url, guild_id)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING at_id, clock_in_time
-                """,
-                self.pan, str(user.id), op_id, role, photo_url,
-                str(interaction.guild_id),
-            )
-
-        embed = build_pending_embed(
-            at_id=row["at_id"], pan=self.pan, name=self.name,
-            discord_user=user, op_id=op_id, role=role,
-            clock_in_time=row["clock_in_time"], photo_url=photo_url,
-        )
-        view = build_validation_view(row["at_id"])
-        validation_msg = await _post_to_validation_channel(interaction.guild, embed, view)
-        if validation_msg is not None:
-            async with pool().acquire() as con:
-                await con.execute(
-                    "UPDATE attendance SET validation_message_id = $2 WHERE at_id = $1",
-                    row["at_id"], str(validation_msg.id),
-                )
-
-        await interaction.followup.send(
-            f"✅ On the clock. `at_id={row['at_id']}` · `{op_id}` · {role}.\n"
-            f"Awaiting confirmation by command. `/clock-out` when your tour ends.",
-            ephemeral=True,
-        )
-
-
-class ClockInView(discord.ui.View):
-    def __init__(self, client: discord.Client, person_pan: str, person_name: str):
-        super().__init__(timeout=600)
-        self.client = client
-        self.pan = person_pan
-        self.name = person_name
-
-    @discord.ui.button(label="Open brief", style=discord.ButtonStyle.secondary)
-    async def open_form(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ClockInModal(self.client, self.pan, self.name))
+# ─── Clock-in: single-shot slash command (op_id + role + photo inline) ───────
 
 
 # ─── Clock-out: button → confirm ─────────────────────────────────────────────
@@ -216,26 +101,81 @@ class ClockOutView(discord.ui.View):
 
 def register(tree: app_commands.CommandTree, client: discord.Client):
 
-    @tree.command(name="clock-in", description="Start your tour (form + photo).")
-    async def clock_in(interaction: discord.Interaction):
+    @tree.command(name="clock-in", description="Start your tour: op ID, role, photo.")
+    @app_commands.describe(
+        op_id="Where you're posted (e.g. mumbai-am)",
+        role="Your role on this op",
+        photo="Sitrep photo proof",
+    )
+    @app_commands.choices(role=[
+        app_commands.Choice(name="OPERATOR", value="OPERATOR"),
+        app_commands.Choice(name="CAPTAIN",  value="CAPTAIN"),
+        app_commands.Choice(name="CHIEF",    value="CHIEF"),
+    ])
+    async def clock_in(
+        interaction: discord.Interaction,
+        op_id: str,
+        role: app_commands.Choice[str],
+        photo: discord.Attachment,
+    ):
         if interaction.guild is None:
             await interaction.response.send_message("Run this in a server.", ephemeral=True)
             return
+
+        # Defer: photo upload + DB write can take a few seconds.
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         async with pool().acquire() as con:
             person = await con.fetchrow(
                 "SELECT pan, name FROM people WHERE discord_id = $1", str(interaction.user.id),
             )
         if not person:
-            await interaction.response.send_message(
-                "Not on the roster yet. Run `/onboard` first.", ephemeral=True,
-            )
+            await interaction.followup.send("Not on the roster yet. Run `/onboard` first.", ephemeral=True)
             return
 
-        await interaction.response.send_message(
-            f"Brief, {interaction.user.mention}. Tap **Open brief** to file op ID + role, "
-            f"then drop a sitrep photo.",
-            view=ClockInView(client, person["pan"], person["name"]),
+        op_id_clean = _validate_op_id(op_id)
+        if op_id_clean is None:
+            await interaction.followup.send("❌ Op ID should be 1–80 chars.", ephemeral=True)
+            return
+
+        if not _is_image_attachment(photo):
+            await interaction.followup.send("❌ That doesn't look like an image attachment.", ephemeral=True)
+            return
+
+        try:
+            photo_url = await upload_attachment(photo.url, photo.content_type or "image/jpeg")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Photo upload failed: `{e}`.", ephemeral=True)
+            return
+
+        async with pool().acquire() as con:
+            row = await con.fetchrow(
+                """
+                INSERT INTO attendance (pp_pan, pp_discord_id, op_id, role, photo_url, guild_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING at_id, clock_in_time
+                """,
+                person["pan"], str(interaction.user.id), op_id_clean, role.value, photo_url,
+                str(interaction.guild_id),
+            )
+
+        embed = build_pending_embed(
+            at_id=row["at_id"], pan=person["pan"], name=person["name"],
+            discord_user=interaction.user, op_id=op_id_clean, role=role.value,
+            clock_in_time=row["clock_in_time"], photo_url=photo_url,
+        )
+        view = build_validation_view(row["at_id"])
+        vm = await _post_to_validation_channel(interaction.guild, embed, view)
+        if vm is not None:
+            async with pool().acquire() as con:
+                await con.execute(
+                    "UPDATE attendance SET validation_message_id = $2 WHERE at_id = $1",
+                    row["at_id"], str(vm.id),
+                )
+
+        await interaction.followup.send(
+            f"✅ On the clock. `at_id={row['at_id']}` · `{op_id_clean}` · {role.value}.\n"
+            f"Awaiting confirmation by command. `/clock-out` when your tour ends.",
             ephemeral=True,
         )
 
