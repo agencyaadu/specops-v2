@@ -14,6 +14,14 @@ VALIDATION_CHANNEL = os.environ.get("ATTENDANCE_VALIDATION_CHANNEL", "attendance
 PHOTO_TIMEOUT = 180
 
 VALID_ROLES = {"OPERATOR", "CAPTAIN", "CHIEF"}
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff")
+
+
+def _is_image_attachment(att: discord.Attachment) -> bool:
+    if att.content_type and att.content_type.startswith("image/"):
+        return True
+    fn = (att.filename or "").lower()
+    return any(fn.endswith(ext) for ext in IMAGE_EXTS)
 
 
 def _humanize(seconds: float) -> str:
@@ -97,7 +105,7 @@ class ClockInModal(discord.ui.Modal, title="SPEC-OPS · Clock in"):
             return (msg.author.id == user.id
                     and msg.channel.id == channel.id
                     and bool(msg.attachments)
-                    and (msg.attachments[0].content_type or "").startswith("image/"))
+                    and any(_is_image_attachment(a) for a in msg.attachments))
 
         try:
             msg = await self.client.wait_for("message", check=check, timeout=PHOTO_TIMEOUT)
@@ -108,9 +116,9 @@ class ClockInModal(discord.ui.Modal, title="SPEC-OPS · Clock in"):
             )
             return
 
-        att = msg.attachments[0]
+        att = next((a for a in msg.attachments if _is_image_attachment(a)), msg.attachments[0])
         try:
-            photo_url = await upload_attachment(att.url, att.content_type)
+            photo_url = await upload_attachment(att.url, att.content_type or "image/jpeg")
         except Exception as e:
             await interaction.followup.send(
                 f"❌ Photo upload failed: `{e}`. Run `/clock-in` again.",
