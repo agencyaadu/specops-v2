@@ -290,6 +290,16 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
     @tree.command(name="clock-out", description="Close your current tour.")
     async def clock_out(interaction: discord.Interaction):
         async with pool().acquire() as con:
+            person = await con.fetchrow(
+                "SELECT pan FROM people WHERE discord_id = $1", str(interaction.user.id),
+            )
+        if not person:
+            await interaction.response.send_message(
+                "Not on the roster yet. Run `/onboard` first.", ephemeral=True,
+            )
+            return
+
+        async with pool().acquire() as con:
             row = await con.fetchrow(
                 """
                 SELECT at_id, op_id, role, clock_in_time
