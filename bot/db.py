@@ -80,6 +80,24 @@ CREATE TABLE IF NOT EXISTS operations (
 CREATE INDEX IF NOT EXISTS operations_factory_idx ON operations (factory_id);
 CREATE INDEX IF NOT EXISTS operations_state_idx   ON operations (state);
 
+CREATE TABLE IF NOT EXISTS op_assignments (
+    id                       bigserial PRIMARY KEY,
+    operation_id             text NOT NULL REFERENCES operations (operation_id) ON DELETE RESTRICT,
+    person_pan               text NOT NULL REFERENCES people (pan) ON DELETE RESTRICT,
+    person_discord_id        text NOT NULL,
+    role                     text NOT NULL,
+    state                    text NOT NULL DEFAULT 'ACTIVE',
+    assigned_by_discord_id   text,
+    created_at               timestamptz NOT NULL DEFAULT now(),
+    updated_at               timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (operation_id, person_pan, role)
+);
+
+CREATE INDEX IF NOT EXISTS op_assign_op_idx     ON op_assignments (operation_id);
+CREATE INDEX IF NOT EXISTS op_assign_pan_idx    ON op_assignments (person_pan);
+CREATE INDEX IF NOT EXISTS op_assign_role_idx   ON op_assignments (role);
+CREATE INDEX IF NOT EXISTS op_assign_disc_idx   ON op_assignments (person_discord_id);
+
 CREATE TABLE IF NOT EXISTS attendance (
     at_id                          bigserial PRIMARY KEY,
     pp_pan                         text NOT NULL REFERENCES people (pan) ON DELETE RESTRICT,

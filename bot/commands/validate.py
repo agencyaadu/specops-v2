@@ -5,12 +5,12 @@ from discord import app_commands
 
 from db import pool
 
-# Discord roles allowed to validate.
-# OPERATOR -> CAPTAIN; CAPTAIN -> CHIEF; CHIEF -> GENERAL.
+# Discord roles allowed to validate (legacy fallback for rows without
+# a selected validator). Case-sensitive; uppercase to match SPEC-OPS naming.
 VALIDATOR_FOR = {
-    "OPERATOR": {"Captain", "Chief", "General"},
-    "CAPTAIN":  {"Chief", "General"},
-    "CHIEF":    {"General"},
+    "OPERATOR": {"CAPTAIN", "CHIEF", "GENERAL", "FREDDY"},
+    "CAPTAIN":  {"CHIEF", "GENERAL", "FREDDY"},
+    "CHIEF":    {"GENERAL", "FREDDY"},
 }
 
 

@@ -14,11 +14,11 @@ VALIDATION_CHANNEL = os.environ.get("ATTENDANCE_VALIDATION_CHANNEL", "attendance
 VALID_ROLES = {"OPERATOR", "CAPTAIN", "CHIEF"}
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff")
 
-# Selected validator must hold one of these Discord roles.
+# Selected validator must hold one of these Discord roles. (Case-sensitive.)
 VALIDATOR_ROLE_FOR = {
-    "OPERATOR": {"Captain", "Chief", "General", "FREDDY"},
-    "CAPTAIN":  {"Chief", "General", "FREDDY"},
-    "CHIEF":    {"General", "FREDDY"},
+    "OPERATOR": {"CAPTAIN", "CHIEF", "GENERAL", "FREDDY"},
+    "CAPTAIN":  {"CHIEF", "GENERAL", "FREDDY"},
+    "CHIEF":    {"GENERAL", "FREDDY"},
 }
 
 
