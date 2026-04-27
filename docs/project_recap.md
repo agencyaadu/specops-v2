@@ -22,7 +22,7 @@ so what happens in Discord shows up on the web instantly.
 - Every onboarded person ends up with a profile in the system.
 
 ### Web profile (live)
-URL: **https://bot-production-5dd6.up.railway.app**
+URL: **https://specops-v2.up.railway.app**
 
 - Sign in with **PAN + Google** (the same Google they linked in Discord).
 - See a personal **home page** with their name, joining date, active
@@ -42,7 +42,7 @@ URL: **https://bot-production-5dd6.up.railway.app**
 1. Open Discord → `#onboarding` channel.
 2. Type `/onboard` → fill the form (PAN, name, WhatsApp) → submit.
 3. Tap **Sign in with Google** → pick their Google account → done.
-4. Open https://bot-production-5dd6.up.railway.app
+4. Open https://specops-v2.up.railway.app
 5. Enter their PAN → click **Continue with Google** → land on home page.
 6. Tap **Edit profile** → fill the rest (DOB, bank, headshot, etc.) → save.
 
@@ -96,7 +96,7 @@ If anything trips you up, ping in the channel.
 
 | Thing | Where |
 |---|---|
-| Web app | https://bot-production-5dd6.up.railway.app |
+| Web app | https://specops-v2.up.railway.app |
 | Discord bot | **FREDDY** in the SPEC-OPS server |
 | Database | Supabase (private) |
 | Code | https://github.com/agencyaadu/specops-v2 |
