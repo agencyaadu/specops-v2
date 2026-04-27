@@ -52,527 +52,117 @@ a { color: #1a55c8; text-decoration: none; }
 </style>
 </head><body>
 <div class="brand-strip">SPEC-OPS · Project Recap</div>
-<h1 id="spec-ops-v2-project-recap">SPEC-OPS v2 — Project Recap</h1>
-<p><strong>Status:</strong> onboarding live, attendance pipeline ready for tomorrow.
-<strong>Date:</strong> 2026-04-27.
-<strong>Repo:</strong> https://github.com/agencyaadu/specops-v2</p>
+<h1 id="spec-ops-v2-what-we-built-today">SPEC-OPS v2 — What we built today</h1>
+<p><strong>Date:</strong> 27 April 2026</p>
 <hr />
-<h2 id="what-spec-ops-v2-is">What SPEC-OPS v2 is</h2>
-<p>A clean rebuild of the SPEC-OPS factory operations app. v1
-(<code>spec-ops.best</code>) stays untouched in production while v2 ships
-incrementally on a new stack and a new schema.</p>
-<p>The pivot vs v1:</p>
+<h2 id="in-one-line">In one line</h2>
+<p>A complete rebuild of SPEC-OPS where the team works inside Discord and
+manages their profile on a website. Both connect to the same database,
+so what happens in Discord shows up on the web instantly.</p>
+<hr />
+<h2 id="whats-working-today">What's working today</h2>
+<h3 id="onboarding-live">Onboarding (live)</h3>
 <ul>
-<li><strong>Discord-first</strong> — all field interactions happen via a bot (FREDDY).
-  Operators, captains, chiefs, generals never touch a web form for
-  daily work.</li>
-<li><strong>Webapp for setup + profile</strong> — onboarding link, profile edit,
-  upcoming admin/dashboard views. One URL, no app to install.</li>
-<li><strong>Single source of truth</strong> — Supabase Postgres. Both Discord and
-  the webapp write to the same tables. A background task mirrors
-  selected tables to Google Sheets every 5 minutes.</li>
+<li>New people type <strong><code>/onboard</code></strong> in the Discord <code>#onboarding</code> channel.</li>
+<li>A small form appears asking for <strong>PAN, full name, and WhatsApp number</strong>.</li>
+<li>After submitting, a <strong>Sign in with Google</strong> button appears — one click
+  links their Google account so they can log in to the website later.</li>
+<li>Every onboarded person ends up with a profile in the system.</li>
+</ul>
+<h3 id="web-profile-live">Web profile (live)</h3>
+<p>URL: <strong>https://bot-production-5dd6.up.railway.app</strong></p>
+<ul>
+<li>Sign in with <strong>PAN + Google</strong> (the same Google they linked in Discord).</li>
+<li>See a personal <strong>home page</strong> with their name, joining date, active
+  operations they're assigned to, and total stats.</li>
+<li>Open the <strong>profile page</strong> to view or edit personal details: date of
+  birth, location, languages, headshot link, intro video link, bank,
+  account number, IFSC, UPI ID.</li>
+</ul>
+<h3 id="background-sync-live">Background sync (live)</h3>
+<ul>
+<li>Selected database tables (people + attendance) automatically copy
+  themselves to a Google Sheet every 5 minutes — no extra work needed.</li>
 </ul>
 <hr />
-<h2 id="live-urls">Live URLs</h2>
+<h2 id="how-a-team-member-uses-it">How a team member uses it</h2>
+<ol>
+<li>Open Discord → <code>#onboarding</code> channel.</li>
+<li>Type <code>/onboard</code> → fill the form (PAN, name, WhatsApp) → submit.</li>
+<li>Tap <strong>Sign in with Google</strong> → pick their Google account → done.</li>
+<li>Open https://bot-production-5dd6.up.railway.app</li>
+<li>Enter their PAN → click <strong>Continue with Google</strong> → land on home page.</li>
+<li>Tap <strong>Edit profile</strong> → fill the rest (DOB, bank, headshot, etc.) → save.</li>
+</ol>
+<p><strong>Total time:</strong> about 2 minutes.</p>
+<hr />
+<h2 id="numbers-so-far">Numbers so far</h2>
 <ul>
-<li><strong>Webapp:</strong> https://bot-production-5dd6.up.railway.app</li>
-<li><strong>Discord bot:</strong> <strong>FREDDY</strong> in the SPEC-OPS server</li>
-<li><strong>Database:</strong> Supabase Postgres (project <code>specopsv2</code>)</li>
-<li><strong>Photo storage:</strong> Supabase Storage bucket <code>specops-v2</code></li>
-<li><strong>Sheets mirror:</strong> Google Sheet <code>specopsv2mirror</code></li>
-<li><strong>Hosting:</strong> Railway (single service runs bot + web)</li>
+<li><strong>24 factories</strong> loaded from the old system, cleaned up.</li>
+<li><strong>29 operations</strong> loaded, each given a short readable ID like
+  <code>MU-AI-U1-NI</code> (Mumbai · Antariksh Infra · Unit 1 · Night).</li>
+<li><strong>31 chief / captain assignments</strong> queued — they activate as each of
+  those people completes onboarding.</li>
+<li><strong>1 person</strong> onboarded so far (the test account).</li>
 </ul>
 <hr />
-<h2 id="stack">Stack</h2>
+<h2 id="whats-coming-next-batch-2">What's coming next (Batch 2)</h2>
+<p>Once everyone is onboarded:</p>
+<ol>
+<li><strong>Attendance</strong> — operators clock in to their op with a photo. The
+   captain assigned to that op approves or rejects in Discord.</li>
+<li><strong>Drag-and-drop assignments</strong> on the website — visually move people
+   between ops and roles instead of typing commands.</li>
+<li><strong>Activity heatmap</strong> on each profile — small grid showing the last
+   7-14 days of attendance for the active op, plus a list of past ops.</li>
+<li><strong>Validation reminders</strong> — the bot DMs the assigned captain if a
+   request sits unconfirmed for too long.</li>
+<li><strong>Admin views</strong> — a single screen showing today's attendance across
+   every op, plus a queue of pending validations.</li>
+<li><strong>Factory + operation creation pages</strong> on the web (currently we add
+   them via scripts).</li>
+</ol>
+<hr />
+<h2 id="what-we-need-from-the-team">What we need from the team</h2>
+<p>Two things to make tomorrow's batch run smoothly:</p>
+<ol>
+<li><strong>Onboard now</strong> — follow the 6 steps above. It takes 2 minutes.</li>
+<li><strong>Keep your Google account</strong> — the link between PAN ↔ Google ↔
+   Discord is what lets you log in.</li>
+</ol>
+<p>If anything trips you up, ping in the channel.</p>
+<hr />
+<h2 id="where-things-live">Where things live</h2>
 <table>
 <thead>
 <tr>
-<th>Layer</th>
-<th>Choice</th>
+<th>Thing</th>
+<th>Where</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Bot framework</td>
-<td><code>discord.py</code> 2.x</td>
+<td>Web app</td>
+<td>https://bot-production-5dd6.up.railway.app</td>
 </tr>
 <tr>
-<td>Web framework</td>
-<td><code>aiohttp</code> (embedded in the bot process)</td>
-</tr>
-<tr>
-<td>DB driver</td>
-<td><code>asyncpg</code></td>
+<td>Discord bot</td>
+<td><strong>FREDDY</strong> in the SPEC-OPS server</td>
 </tr>
 <tr>
 <td>Database</td>
-<td>Supabase Postgres (transaction pooler)</td>
+<td>Supabase (private)</td>
 </tr>
 <tr>
-<td>File storage</td>
-<td>Supabase Storage (photos, docs)</td>
+<td>Code</td>
+<td>https://github.com/agencyaadu/specops-v2</td>
 </tr>
 <tr>
-<td>Sheets sync</td>
-<td><code>gspread</code> + Google service account</td>
-</tr>
-<tr>
-<td>Auth (Discord)</td>
-<td>Discord OAuth (native)</td>
-</tr>
-<tr>
-<td>Auth (webapp)</td>
-<td>Google OAuth + PAN, signed JWT cookie</td>
-</tr>
-<tr>
-<td>Hosting</td>
-<td>Railway, single service</td>
-</tr>
-<tr>
-<td>Python</td>
-<td>3.12</td>
+<td>This document</td>
+<td><code>/recap.pdf</code> on the web app</td>
 </tr>
 </tbody>
 </table>
-<p>No Vercel, no FastAPI, no separate frontend service. One process.</p>
 <hr />
-<h2 id="schema">Schema</h2>
-<p>Five tables, all UPPERCASE values where human-entered.</p>
-<h3 id="people"><code>people</code></h3>
-<p>The roster. PAN is the primary identity.</p>
-<table>
-<thead>
-<tr>
-<th>Column</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>pan</code></td>
-<td>TEXT PRIMARY KEY (e.g. <code>ABCDE1234F</code>)</td>
-</tr>
-<tr>
-<td><code>discord_id</code>, <code>discord_username</code></td>
-<td>Bot identity (NOT NULL, UNIQUE on discord_id)</td>
-</tr>
-<tr>
-<td><code>google_id</code>, <code>email</code></td>
-<td>Web login identity (UNIQUE on google_id)</td>
-</tr>
-<tr>
-<td><code>name</code>, <code>wa_number</code></td>
-<td>NOT NULL — captured at onboard</td>
-</tr>
-<tr>
-<td><code>dob</code>, <code>location</code>, <code>languages</code>, <code>hardest_problem</code></td>
-<td>Optional — filled via web profile</td>
-</tr>
-<tr>
-<td><code>headshot_url</code>, <code>intro_video_url</code></td>
-<td>Optional URLs</td>
-</tr>
-<tr>
-<td><code>bank_name</code>, <code>account_number</code>, <code>ifsc</code>, <code>upi_id</code></td>
-<td>Optional bank details</td>
-</tr>
-</tbody>
-</table>
-<h3 id="factories"><code>factories</code></h3>
-<p>Physical sites. One row per factory.</p>
-<table>
-<thead>
-<tr>
-<th>Column</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>factory_id</code></td>
-<td>TEXT UNIQUE slug (e.g. <code>cse-1</code>)</td>
-</tr>
-<tr>
-<td><code>name</code>, <code>city</code></td>
-<td>UPPERCASE</td>
-</tr>
-<tr>
-<td><code>state</code></td>
-<td><code>ACTIVE</code> / <code>INACTIVE</code></td>
-</tr>
-</tbody>
-</table>
-<h3 id="operations"><code>operations</code></h3>
-<p>A working shift at a factory unit.</p>
-<table>
-<thead>
-<tr>
-<th>Column</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>operation_id</code></td>
-<td>UNIQUE 4-segment ID: <strong><code>CC-FF-Un-XX</code></strong> all caps (city, factory, unit, shift)</td>
-</tr>
-<tr>
-<td><code>factory_id</code>, <code>shift</code>, <code>unit</code>, <code>city</code></td>
-<td>Components of the ID</td>
-</tr>
-<tr>
-<td><code>map_link</code></td>
-<td>Google Maps link</td>
-</tr>
-<tr>
-<td><code>poc1</code>, <code>poc2</code></td>
-<td>JSONB <code>{name, phone, role}</code></td>
-</tr>
-<tr>
-<td><code>sales_team_name</code></td>
-<td>Internal team</td>
-</tr>
-<tr>
-<td><code>shift_start</code>, <code>shift_end</code>, <code>reporting_time</code>, <code>deployment_start</code>, <code>collection_start</code>, <code>report_submission_time</code>, <code>final_closing_time</code></td>
-<td>Timing fields, all <code>time</code> type</td>
-</tr>
-</tbody>
-</table>
-<p>Examples:
-- <code>MU-AI-U1-NI</code> — Mumbai · Antariksh Infra · Unit 1 · Night
-- <code>JA-CS-U2-SA</code> — Jaipur · CSE · Unit 2 · Shift A
-- <code>PI-ST-U3-SA</code> — Pithampur · Shri Tirupati Balaji · Unit 3 · Shift A</p>
-<p>A deterministic short-id generator (<code>bot/short_id.py</code>) builds these
-with collision-walking fallback.</p>
-<h3 id="op_assignments"><code>op_assignments</code></h3>
-<p>Who works on which op, and at what rank.</p>
-<table>
-<thead>
-<tr>
-<th>Column</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>operation_id</code></td>
-<td>FK → operations</td>
-</tr>
-<tr>
-<td><code>person_pan</code>, <code>person_discord_id</code></td>
-<td>NOT NULL — onboard required first</td>
-</tr>
-<tr>
-<td><code>role</code></td>
-<td><code>OPERATOR</code> / <code>CAPTAIN</code> / <code>CHIEF</code></td>
-</tr>
-<tr>
-<td><code>state</code></td>
-<td><code>ACTIVE</code> / <code>INACTIVE</code></td>
-</tr>
-<tr>
-<td>UNIQUE <code>(operation_id, person_pan, role)</code></td>
-<td></td>
-</tr>
-</tbody>
-</table>
-<h3 id="attendance"><code>attendance</code></h3>
-<p>One row per clock-in. Mutated for clock-out + validation.</p>
-<table>
-<thead>
-<tr>
-<th>Column</th>
-<th>Notes</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>at_id</code></td>
-<td>bigserial PK</td>
-</tr>
-<tr>
-<td><code>pp_pan</code>, <code>pp_discord_id</code></td>
-<td>The operator</td>
-</tr>
-<tr>
-<td><code>op_id</code>, <code>role</code></td>
-<td>Where &amp; what</td>
-</tr>
-<tr>
-<td><code>clock_in_time</code>, <code>clock_out_time</code></td>
-<td>timestamptz</td>
-</tr>
-<tr>
-<td><code>photo_url</code></td>
-<td>Supabase Storage URL</td>
-</tr>
-<tr>
-<td><code>selected_validator_discord_id</code></td>
-<td>Picked at clock-in</td>
-</tr>
-<tr>
-<td><code>validator_discord_id</code>, <code>validation</code>, <code>validated_at</code>, <code>rejection_reason</code></td>
-<td>Set on Approve/Reject</td>
-</tr>
-<tr>
-<td><code>guild_id</code>, <code>validation_message_id</code>, <code>thread_id</code></td>
-<td>Discord plumbing</td>
-</tr>
-</tbody>
-</table>
-<p>Uniqueness: one clock-in per (operator, op, IST date).</p>
-<hr />
-<h2 id="discord-freddy-slash-commands">Discord (FREDDY) — slash commands</h2>
-<table>
-<thead>
-<tr>
-<th>Command</th>
-<th>Who can run</th>
-<th>What it does</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>/onboard</code></td>
-<td>anyone</td>
-<td>In <code>#onboarding</code>, opens a modal: PAN + name + WhatsApp. After submit, shows a <em>Sign in with Google</em> button to link the Google account</td>
-</tr>
-<tr>
-<td><code>/clock-in</code></td>
-<td>onboarded operators</td>
-<td>Op autocomplete + role + photo + validator autocomplete (only assigned validators show up). Posts an embed with Approve/Reject buttons in a private thread inside <code>#attendance-validation</code>, visible to the operator + selected validator only</td>
-</tr>
-<tr>
-<td><code>/clock-out</code></td>
-<td>onboarded operators</td>
-<td>Closes the latest open tour with a confirm button</td>
-</tr>
-<tr>
-<td><code>/op-list</code></td>
-<td>anyone</td>
-<td>Lists active operations</td>
-</tr>
-<tr>
-<td><code>/op-roster</code></td>
-<td>anyone</td>
-<td>Shows everyone assigned to a given op</td>
-</tr>
-<tr>
-<td><code>/assign-chief</code></td>
-<td>FREDDY/GENERAL</td>
-<td>Assigns a CHIEF to an op</td>
-</tr>
-<tr>
-<td><code>/assign-captain</code></td>
-<td>assigned CHIEF (+ above)</td>
-<td>Assigns a CAPTAIN to an op</td>
-</tr>
-<tr>
-<td><code>/assign-operator</code></td>
-<td>assigned CAPTAIN (+ above)</td>
-<td>Assigns an OPERATOR to an op</td>
-</tr>
-<tr>
-<td><code>/unassign</code></td>
-<td>rank-gated like assign</td>
-<td>Removes someone from an op</td>
-</tr>
-</tbody>
-</table>
-<h3 id="validation-chain">Validation chain</h3>
-<p>When an operator clocks in, the bot:</p>
-<ol>
-<li>Resolves the validator from the autocomplete pick.</li>
-<li>Verifies they're assigned at the right rank for that op.</li>
-<li>Creates a <strong>private thread</strong> in <code>#attendance-validation</code>, invites
-   only the operator + the selected validator, and posts the embed
-   with <strong>Approve</strong> + <strong>Reject</strong> buttons.</li>
-<li>On Approve: status flips to <code>CONFIRMED</code>, embed colour changes,
-   buttons disable.</li>
-<li>On Reject: opens a modal asking for a reason; status flips to
-   <code>REJECTED</code> with the reason captured.</li>
-</ol>
-<p>Rank-up rule:</p>
-<ul>
-<li>OPERATOR clock-in → CAPTAIN validates</li>
-<li>CAPTAIN clock-in → CHIEF validates</li>
-<li>CHIEF clock-in → GENERAL/FREDDY validates</li>
-</ul>
-<p>Self-validation is blocked.</p>
-<hr />
-<h2 id="webapp-routes">Webapp routes</h2>
-<p>Hosted at https://bot-production-5dd6.up.railway.app — minimal pages,
-dark monochrome, no JS framework.</p>
-<table>
-<thead>
-<tr>
-<th>Route</th>
-<th>What</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>/</code></td>
-<td>Redirects to <code>/home</code> if signed in else <code>/login</code></td>
-</tr>
-<tr>
-<td><code>/login</code></td>
-<td>Form: PAN + <em>Continue with Google</em> button. PAN+Google = two-factor login</td>
-</tr>
-<tr>
-<td><code>/auth/google/login</code></td>
-<td>Kicks off Google OAuth in login mode</td>
-</tr>
-<tr>
-<td><code>/google/callback</code></td>
-<td>Handles both link mode (from Discord button) and login mode</td>
-</tr>
-<tr>
-<td><code>/logout</code></td>
-<td>Clears session cookie</td>
-</tr>
-<tr>
-<td><code>/home</code></td>
-<td>Welcome card, stat tiles (active ops, total tours, confirmed), active op cards, View/Edit profile buttons</td>
-</tr>
-<tr>
-<td><code>/profile/&lt;pan&gt;</code></td>
-<td>Read-only profile view, gated to the signed-in user</td>
-</tr>
-<tr>
-<td><code>/profile/&lt;pan&gt;/edit</code></td>
-<td>Edit form for DOB, location, languages, hardest_problem, headshot URL, intro video URL, bank, account, IFSC, UPI</td>
-</tr>
-<tr>
-<td><code>POST /profile/&lt;pan&gt;</code></td>
-<td>Save profile edits</td>
-</tr>
-<tr>
-<td><code>/health</code></td>
-<td>Healthcheck</td>
-</tr>
-</tbody>
-</table>
-<p>Session: signed JWT (HS256) in HttpOnly + Secure + SameSite=Lax cookie,
-14-day TTL.</p>
-<hr />
-<h2 id="sheets-mirror">Sheets mirror</h2>
-<p>A background task in the bot process pushes selected tables to a
-Google Sheet every 5 minutes. Currently mirrors:</p>
-<ul>
-<li><code>people</code></li>
-<li><code>attendance</code></li>
-</ul>
-<p>Each tab is a full-snapshot overwrite (simple, idempotent, slow tables).</p>
-<hr />
-<h2 id="onboarding-flow-end-to-end">Onboarding flow (end-to-end)</h2>
-<p>The journey for a new team member:</p>
-<ol>
-<li>Run <code>/onboard</code> in <code>#onboarding</code>.</li>
-<li>Tap <strong>Open brief</strong> → fill 3 fields (PAN, full name, WhatsApp).</li>
-<li>After ✅ "you're on the SPEC-OPS roster", tap <strong>Sign in with Google</strong>.</li>
-<li>Browser opens → pick the Google account → consent.</li>
-<li>Lands on the <em>Onboarding complete</em> page → tap <strong>Open my profile</strong>.</li>
-<li>On <code>/profile/&lt;pan&gt;</code>, tap <strong>Edit profile</strong>. Fill the rest of the
-   profile (DOB, bank, headshot URL, intro video URL, etc.). Save.</li>
-</ol>
-<p>After onboarding:</p>
-<ul>
-<li>A FREDDY/GENERAL assigns the person as a CHIEF on an op.</li>
-<li>That CHIEF assigns CAPTAINs.</li>
-<li>Those CAPTAINs assign OPERATORs.</li>
-<li>Operators run <code>/clock-in</code> → validator picks up Approve/Reject in
-  the private thread.</li>
-</ul>
-<hr />
-<h2 id="imported-data-so-far">Imported data so far</h2>
-<ul>
-<li><strong>24 factories</strong> + <strong>29 operations</strong> ETL'd from the v1 ops CSV.
-  Cleanup pass: trim, slug, uppercase, dedupe; long IDs renamed to
-  short <code>CC-FF-Un-XX</code> form (collision-protected).</li>
-<li><strong>31 chief/captain assignments</strong> loaded from the v1 assignments
-  CSV. Most skipped tonight because the chiefs haven't onboarded
-  yet — re-run after they do.</li>
-</ul>
-<hr />
-<h2 id="whats-done-vs-whats-next">What's done vs what's next</h2>
-<h3 id="done">Done</h3>
-<ul>
-<li>Schema (5 tables) live in production</li>
-<li>Discord bot online (FREDDY) with all 9 slash commands synced to the guild</li>
-<li>Onboarding flow (Discord modal → Google OAuth → web profile)</li>
-<li>Webapp (login, home, profile view + edit, logout)</li>
-<li>Validation: per-clock-in private thread + selected-validator gating</li>
-<li>Validator autocomplete from assignments</li>
-<li>Sheets mirror running every 5 minutes</li>
-<li>ETL scripts for ops + assignments CSVs</li>
-</ul>
-<h3 id="next-tomorrow">Next (tomorrow)</h3>
-<ul>
-<li><strong>Webapp drag-drop assignments page</strong> — replace the slash-command
-  chain with a visual UI for adding/removing chiefs, captains,
-  operators per op</li>
-<li><strong>Webapp factory + op management</strong> — currently slash commands are
-  removed, so creating new ops only happens via SQL/scripts until
-  these pages land</li>
-<li><strong>Profile heatmap</strong> — per active op, 7–14 day cell grid + past ops
-  list (from the wireframes)</li>
-<li><strong>Per-op-per-role long-lived threads</strong> — instead of per-clock-in
-  private threads, one shared thread per (op, role-tier) for easier
-  validator triage</li>
-<li><strong>Admin views</strong> — today's attendance per op + cross-op pending
-  validation queue</li>
-<li><strong>Validation reminder DM</strong> — DM the validator if a request sits
-  pending for &gt; N hours</li>
-</ul>
-<hr />
-<h2 id="key-files-in-the-repo">Key files in the repo</h2>
-<ul>
-<li><code>bot/main.py</code> — bot entry; boots discord client + web server +
-  sheets mirror loop</li>
-<li><code>bot/db.py</code> — schema + asyncpg pool</li>
-<li><code>bot/short_id.py</code> — deterministic 2-char codes for the op_id</li>
-<li><code>bot/web.py</code> — embedded aiohttp web server (login, profile, OAuth)</li>
-<li><code>bot/commands/onboard.py</code> — modal + Google link button</li>
-<li><code>bot/commands/attendance.py</code> — <code>/clock-in</code>, <code>/clock-out</code>,
-  validator autocomplete</li>
-<li><code>bot/commands/validate.py</code> — Approve/Reject buttons + role gating</li>
-<li><code>bot/commands/admin.py</code> — <code>/op-list</code>, <code>/op-roster</code>, <code>/assign-*</code>,
-  <code>/unassign</code></li>
-<li><code>bot/sheets_mirror.py</code> — Google Sheets push loop</li>
-<li><code>bot/storage.py</code> — Supabase Storage upload helper</li>
-<li><code>scripts/import_ops_csv.py</code> — one-shot ETL for ops CSV</li>
-<li><code>scripts/import_assignments_csv.py</code> — one-shot ETL for assignments
-  CSV (skips rows where the email isn't on the roster yet)</li>
-<li><code>scripts/apply_short_ids.py</code> — one-shot rewrite of operation_ids
-  to the short form</li>
-<li><code>docs/schema.dbml</code> — full v2 schema (canonical reference; paste
-  into dbdiagram.io)</li>
-</ul>
-<hr />
-<h2 id="decision-log-highlights-from-this-build">Decision log (highlights from this build)</h2>
-<ol>
-<li><strong>Discord-first over webapp</strong> for daily ops — no app installs, the
-   field team is already on Discord all day.</li>
-<li><strong>Single Railway service</strong> instead of separating bot + web — one
-   deploy, one log stream, half the infra to manage.</li>
-<li><strong>Webapp embedded in the bot process</strong> (aiohttp alongside discord.py)
-   — no second backend, no separate auth surface.</li>
-<li><strong>PAN as the human ID</strong> — instead of an auto-generated <code>SO-NNNNN</code>,
-   reuse the existing identity number people already carry.</li>
-<li><strong>Drop op_password</strong> — was on the design table for /clock-in, removed
-   for the imported batch since rotation policy isn't decided yet. Can
-   re-add when ops want it.</li>
-<li><strong>Short op_ids</strong> (<code>CC-FF-Un-XX</code> 4-segment, max ~16 chars) — long
-   slugs were unscannable in Discord; the 2-char-per-segment rule with
-   collision walk gives us readable but unique IDs.</li>
-<li><strong>Slash commands per-guild sync</strong> instead of global — global takes
-   up to an hour to propagate; per-guild is instant and we're
-   single-server for now.</li>
-<li><strong>All-caps everywhere</strong> for human-visible identifiers and team
-   names — consistent visual signal for "this is a SPEC-OPS field".</li>
-</ol>
-<hr />
-<p><em>This recap covers the build through 27 Apr 2026. Live deploy commit
-on Railway is on the <code>main</code> branch of <code>agencyaadu/specops-v2</code>.</em></p>
+<p><em>See you in the next batch.</em></p>
 </body></html>
