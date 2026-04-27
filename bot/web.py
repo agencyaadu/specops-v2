@@ -337,6 +337,16 @@ async def home(request: web.Request) -> web.Response:
             'Once command assigns you, your op cards show up here.</div>'
         )
 
+    admin_section = ""
+    if _is_admin(session):
+        admin_section = """
+        <h2>Admin</h2>
+        <p style="margin:12px 0 24px;">
+          <a class="btn secondary" href="/factories">Factories</a>
+          <a class="btn secondary" href="/operations">Operations</a>
+        </p>
+        """
+
     body = f"""
     {_topbar(session)}
     <h1>Welcome, {h(row['name'])}</h1>
@@ -355,6 +365,8 @@ async def home(request: web.Request) -> web.Response:
       <a class="btn secondary" href="/profile/{h(pan)}">View profile</a>
       <a class="btn"           href="/profile/{h(pan)}/edit">Edit profile</a>
     </p>
+
+    {admin_section}
     """
     return _layout(f"Home · {row['name']}", body)
 
@@ -712,6 +724,292 @@ async def profile_edit_form(request: web.Request) -> web.Response:
     return _layout(f"Edit · {row['name']}", body)
 
 
+# ─── Factory + Operation management (admin only) ─────────────────────────────
+
+def _is_admin(session: dict | None) -> bool:
+    return bool(session and session.get("admin"))
+
+
+def _admin_required(session: dict | None) -> web.Response | None:
+    if session is None:
+        return web.HTTPFound("/login")
+    if not _is_admin(session):
+        return _layout(
+            "Forbidden",
+            f'{_topbar(session)}<h1>Forbidden</h1>'
+            f'<p>Only FREDDY/GENERAL can manage factories + operations.</p>'
+            f'<a class="btn secondary" href="/home">Back home</a>',
+            status=403,
+        )
+    return None
+
+
+async def factories_list(request: web.Request) -> web.Response:
+    session = _session_from_request(request)
+    if session is None:
+        raise web.HTTPFound("/login")
+
+    async with pool().acquire() as con:
+        rows = await con.fetch(
+            """
+            SELECT f.factory_id, f.name, f.city, f.state,
+                   (SELECT count(*)::int FROM operations o WHERE o.factory_id = f.factory_id) AS op_count
+              FROM factories f
+             ORDER BY f.city NULLS LAST, f.name
+            """
+        )
+
+    body_rows = "\n".join(
+        f'<tr>'
+        f'<td><code>{h(r["factory_id"])}</code></td>'
+        f'<td>{h(r["name"])}</td>'
+        f'<td>{h(r["city"] or "—")}</td>'
+        f'<td>{h(r["state"])}</td>'
+        f'<td style="text-align:right">{r["op_count"]}</td>'
+        f'</tr>'
+        for r in rows
+    )
+
+    add_btn = (
+        '<a class="btn" href="/factories/new">+ Add factory</a>'
+        if _is_admin(session) else ""
+    )
+
+    body = f"""
+    {_topbar(session)}
+    <div style="display:flex; justify-content:space-between; align-items:end;">
+      <div><h1>Factories</h1><p class="sub">{len(rows)} total</p></div>
+      <div>{add_btn}</div>
+    </div>
+    <table style="margin-top:12px;">
+      <tr><th>ID</th><th>Name</th><th>City</th><th>State</th><th style="text-align:right">Ops</th></tr>
+      {body_rows}
+    </table>
+    """
+    return _layout("Factories", body)
+
+
+async def factory_new_form(request: web.Request) -> web.Response:
+    session = _session_from_request(request)
+    forb = _admin_required(session)
+    if forb:
+        return forb
+
+    err = request.query.get("err", "")
+    err_html = ""
+    if err == "exists":
+        err_html = '<div class="note err">A factory with that ID already exists.</div>'
+    elif err == "invalid":
+        err_html = '<div class="note err">Invalid input — all three fields required.</div>'
+
+    body = f"""
+    {_topbar(session)}
+    <h1>Add factory</h1>
+    <p class="sub">Slug + display name + city. The city's first 2 letters become the prefix in operation IDs.</p>
+    {err_html}
+    <form method="post" action="/factories/new">
+      <div class="field">
+        <label>Slug (lowercase, hyphens)</label>
+        <input type="text" name="factory_id" required pattern="[a-z0-9\\-]+" placeholder="mumbai-x">
+      </div>
+      <div class="field">
+        <label>Display name</label>
+        <input type="text" name="name" required placeholder="Mumbai Plant">
+      </div>
+      <div class="field">
+        <label>City</label>
+        <input type="text" name="city" required placeholder="Mumbai">
+      </div>
+      <p style="margin-top:24px;">
+        <button type="submit">Create</button>
+        <a class="btn secondary" href="/factories">Cancel</a>
+      </p>
+    </form>
+    """
+    return _layout("New factory", body)
+
+
+async def factory_save(request: web.Request) -> web.Response:
+    session = _session_from_request(request)
+    forb = _admin_required(session)
+    if forb:
+        return forb
+
+    form = await request.post()
+    factory_id = (form.get("factory_id") or "").strip().lower()
+    name       = (form.get("name") or "").strip().upper()
+    city       = (form.get("city") or "").strip().upper()
+
+    if not (factory_id and name and city):
+        raise web.HTTPFound("/factories/new?err=invalid")
+
+    async with pool().acquire() as con:
+        existing = await con.fetchval("SELECT 1 FROM factories WHERE factory_id = $1", factory_id)
+        if existing:
+            raise web.HTTPFound("/factories/new?err=exists")
+        await con.execute(
+            "INSERT INTO factories (factory_id, name, city, created_by) VALUES ($1, $2, $3, $4)",
+            factory_id, name, city, session["did"],
+        )
+    raise web.HTTPFound("/factories")
+
+
+async def operations_list(request: web.Request) -> web.Response:
+    session = _session_from_request(request)
+    if session is None:
+        raise web.HTTPFound("/login")
+
+    async with pool().acquire() as con:
+        rows = await con.fetch(
+            """
+            SELECT o.operation_id, o.shift, o.unit, o.city, o.state,
+                   f.name AS factory_name
+              FROM operations o
+              JOIN factories f ON f.factory_id = o.factory_id
+             ORDER BY o.city NULLS LAST, f.name, o.shift, o.unit
+            """
+        )
+
+    body_rows = "\n".join(
+        f'<tr>'
+        f'<td><code>{h(r["operation_id"])}</code></td>'
+        f'<td>{h(r["factory_name"])}</td>'
+        f'<td>{h(r["city"] or "—")}</td>'
+        f'<td>{h(r["unit"])}</td>'
+        f'<td>{h(r["shift"])}</td>'
+        f'<td>{h(r["state"])}</td>'
+        f'</tr>'
+        for r in rows
+    )
+
+    add_btn = (
+        '<a class="btn" href="/operations/new">+ Add operation</a>'
+        if _is_admin(session) else ""
+    )
+
+    body = f"""
+    {_topbar(session)}
+    <div style="display:flex; justify-content:space-between; align-items:end;">
+      <div><h1>Operations</h1><p class="sub">{len(rows)} total</p></div>
+      <div>{add_btn}</div>
+    </div>
+    <table style="margin-top:12px;">
+      <tr><th>ID</th><th>Factory</th><th>City</th><th>Unit</th><th>Shift</th><th>State</th></tr>
+      {body_rows}
+    </table>
+    """
+    return _layout("Operations", body)
+
+
+async def operation_new_form(request: web.Request) -> web.Response:
+    session = _session_from_request(request)
+    forb = _admin_required(session)
+    if forb:
+        return forb
+
+    async with pool().acquire() as con:
+        factories = await con.fetch(
+            "SELECT factory_id, name, city FROM factories WHERE state='ACTIVE' ORDER BY city, name"
+        )
+
+    if not factories:
+        body = f"""
+        {_topbar(session)}
+        <h1>Add operation</h1>
+        <div class="note">No factories registered yet — create one first.</div>
+        <p style="margin-top:16px;"><a class="btn" href="/factories/new">+ Add factory</a></p>
+        """
+        return _layout("New operation", body)
+
+    options = "\n".join(
+        f'<option value="{h(f["factory_id"])}">{h(f["name"])} · {h(f["city"] or "?")}</option>'
+        for f in factories
+    )
+
+    err = request.query.get("err", "")
+    err_html = ""
+    if err == "no_city":
+        err_html = '<div class="note err">Pick a factory with a city set.</div>'
+    elif err == "exists":
+        err_html = '<div class="note err">An operation with the generated ID already exists.</div>'
+    elif err == "invalid":
+        err_html = '<div class="note err">Invalid input.</div>'
+
+    body = f"""
+    {_topbar(session)}
+    <h1>Add operation</h1>
+    <p class="sub">The op ID is built automatically as <code>CITY-FACTORY-UNIT-SHIFT</code> from your inputs.</p>
+    {err_html}
+    <form method="post" action="/operations/new">
+      <div class="field">
+        <label>Factory</label>
+        <select name="factory_id" required>{options}</select>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Shift</label>
+          <input type="text" name="shift" required placeholder="Shift A / Night / Morning / 10am to 6pm">
+        </div>
+        <div class="field">
+          <label>Unit</label>
+          <input type="text" name="unit" value="U1" required pattern="U[0-9\\-&]+" maxlength="10">
+        </div>
+      </div>
+      <p style="margin-top:24px;">
+        <button type="submit">Create</button>
+        <a class="btn secondary" href="/operations">Cancel</a>
+      </p>
+    </form>
+    """
+    return _layout("New operation", body)
+
+
+async def operation_save(request: web.Request) -> web.Response:
+    session = _session_from_request(request)
+    forb = _admin_required(session)
+    if forb:
+        return forb
+
+    form = await request.post()
+    factory_id = (form.get("factory_id") or "").strip().lower()
+    shift_raw  = (form.get("shift") or "").strip()
+    unit_code  = (form.get("unit") or "U1").strip().upper()
+
+    if not (factory_id and shift_raw and unit_code):
+        raise web.HTTPFound("/operations/new?err=invalid")
+
+    # Build short op_id with collision protection.
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent))
+    from short_id import build_op_id, split_factory_unit
+
+    async with pool().acquire() as con:
+        factory = await con.fetchrow(
+            "SELECT name, city FROM factories WHERE factory_id = $1", factory_id,
+        )
+        if not factory or not factory["city"]:
+            raise web.HTTPFound("/operations/new?err=no_city")
+
+        taken = {r["operation_id"] for r in await con.fetch("SELECT operation_id FROM operations")}
+        fac_base, _ = split_factory_unit(factory["name"])
+        op_id = build_op_id(factory["city"], fac_base, unit_code, shift_raw, taken)
+
+        existing = await con.fetchval("SELECT 1 FROM operations WHERE operation_id = $1", op_id)
+        if existing:
+            raise web.HTTPFound("/operations/new?err=exists")
+
+        await con.execute(
+            """
+            INSERT INTO operations (operation_id, factory_id, shift, unit, city, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            op_id, factory_id, shift_raw.upper(), unit_code, factory["city"], session["did"],
+        )
+
+    raise web.HTTPFound("/operations")
+
+
 async def profile_save(request: web.Request) -> web.Response:
     pan = request.match_info.get("pan", "").strip().upper()
     session = _session_from_request(request)
@@ -783,6 +1081,14 @@ def make_app() -> web.Application:
     app.router.add_get("/profile/{pan}", profile_view)
     app.router.add_get("/profile/{pan}/edit", profile_edit_form)
     app.router.add_post("/profile/{pan}", profile_save)
+
+    # Admin: factories + operations
+    app.router.add_get ("/factories",         factories_list)
+    app.router.add_get ("/factories/new",     factory_new_form)
+    app.router.add_post("/factories/new",     factory_save)
+    app.router.add_get ("/operations",        operations_list)
+    app.router.add_get ("/operations/new",    operation_new_form)
+    app.router.add_post("/operations/new",    operation_save)
     return app
 
 
