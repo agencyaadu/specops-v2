@@ -65,8 +65,11 @@ def _state_link(pan: str, discord_id: str) -> str:
     return _signed({"mode": "link", "pan": pan, "did": discord_id}, STATE_TTL_SECONDS)
 
 
-def _state_login() -> str:
-    return _signed({"mode": "login"}, STATE_TTL_SECONDS)
+def _state_login(expected_pan: str | None = None) -> str:
+    payload: dict = {"mode": "login"}
+    if expected_pan:
+        payload["expected_pan"] = expected_pan
+    return _signed(payload, STATE_TTL_SECONDS)
 
 
 def _session_cookie_value(pan: str, discord_id: str, name: str, email: str | None) -> str:
@@ -122,10 +125,11 @@ def google_signin_url(pan: str, discord_id: str) -> str:
     return _google_authorize(_state_link(pan, discord_id))
 
 
-def google_login_url() -> str:
+def google_login_url(expected_pan: str | None = None) -> str:
     """For the /login page — looks up an existing people row by Google
-    identity and issues a session cookie."""
-    return _google_authorize(_state_login())
+    identity and issues a session cookie. Optional PAN binds the session
+    to a specific roster row (rejects mismatches)."""
+    return _google_authorize(_state_login(expected_pan))
 
 
 # ─── Templates ───────────────────────────────────────────────────────────────
@@ -185,6 +189,20 @@ def _layout(title: str, body_html: str, *, status: int = 200) -> web.Response:
     color: #888; font-size: 13px; }}
   .err {{ border-color: #ff5757; color: #ff5757; }}
   .ok  {{ border-color: #4ade80; color: #4ade80; }}
+
+  .stats {{ display: flex; gap: 12px; margin: 24px 0; }}
+  .stat {{ flex: 1; padding: 18px 14px; border: 1px solid #1c1c1c; }}
+  .stat .num {{ font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }}
+  .stat .lbl {{ font-size: 11px; color: #666; text-transform: uppercase;
+    letter-spacing: 0.1em; margin-top: 4px; }}
+
+  .opgrid {{ display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 12px; }}
+  @media (min-width: 540px) {{ .opgrid {{ grid-template-columns: 1fr 1fr; }} }}
+  .opcard {{ padding: 14px; border: 1px solid #1c1c1c; }}
+  .opmeta {{ font-size: 11px; color: #666; text-transform: uppercase;
+    letter-spacing: 0.1em; }}
+  .opname {{ font-size: 16px; margin: 4px 0 6px; }}
+  .opid code {{ font-size: 12px; }}
 </style>
 </head><body>
   <div class="wrap">
@@ -220,8 +238,80 @@ async def health(request: web.Request) -> web.Response:
 async def landing(request: web.Request) -> web.Response:
     session = _session_from_request(request)
     if session:
-        raise web.HTTPFound(f"/profile/{session['pan']}")
+        raise web.HTTPFound("/home")
     raise web.HTTPFound("/login")
+
+
+async def home(request: web.Request) -> web.Response:
+    session = _session_from_request(request)
+    if not session:
+        raise web.HTTPFound("/login")
+
+    pan = session["pan"]
+    name = session.get("name", "")
+
+    async with pool().acquire() as con:
+        row = await con.fetchrow(
+            """
+            SELECT name, email, wa_number, created_at,
+                   (SELECT count(*)::int FROM op_assignments WHERE person_pan = people.pan AND state = 'ACTIVE') AS active_ops,
+                   (SELECT count(*)::int FROM attendance     WHERE pp_pan = people.pan)                             AS total_attendance,
+                   (SELECT count(*)::int FROM attendance     WHERE pp_pan = people.pan AND validation = 'CONFIRMED') AS confirmed
+              FROM people WHERE pan = $1
+            """,
+            pan,
+        )
+        active = await con.fetch(
+            """
+            SELECT a.operation_id, a.role, o.city, f.name AS factory_name
+              FROM op_assignments a
+              JOIN operations o ON o.operation_id = a.operation_id
+              JOIN factories  f ON f.factory_id = o.factory_id
+             WHERE a.person_pan = $1 AND a.state = 'ACTIVE'
+             ORDER BY a.role, a.operation_id
+            """,
+            pan,
+        )
+
+    if row is None:
+        raise web.HTTPFound("/logout")
+
+    ops_html = ""
+    if active:
+        items = "".join(
+            f'<div class="opcard"><div class="opmeta">{h(a["role"])}</div>'
+            f'<div class="opname">{h(a["factory_name"])}</div>'
+            f'<div class="opid"><code>{h(a["operation_id"])}</code></div></div>'
+            for a in active
+        )
+        ops_html = f'<h2>Active operations</h2><div class="opgrid">{items}</div>'
+    else:
+        ops_html = (
+            '<h2>Active operations</h2>'
+            '<div class="note">You\'re not assigned to any op yet. '
+            'Once command assigns you, your op cards show up here.</div>'
+        )
+
+    body = f"""
+    {_topbar(session)}
+    <h1>Welcome, {h(row['name'])}</h1>
+    <p class="sub"><code>{h(pan)}</code> · joined {row['created_at'].strftime('%d %b %Y')}</p>
+
+    <div class="stats">
+      <div class="stat"><div class="num">{row['active_ops']}</div><div class="lbl">Active ops</div></div>
+      <div class="stat"><div class="num">{row['total_attendance']}</div><div class="lbl">Total tours</div></div>
+      <div class="stat"><div class="num">{row['confirmed']}</div><div class="lbl">Confirmed</div></div>
+    </div>
+
+    {ops_html}
+
+    <h2>Account</h2>
+    <p style="margin:12px 0 24px;">
+      <a class="btn secondary" href="/profile/{h(pan)}">View profile</a>
+      <a class="btn"           href="/profile/{h(pan)}/edit">Edit profile</a>
+    </p>
+    """
+    return _layout(f"Home · {row['name']}", body)
 
 
 # ─── Login + logout ──────────────────────────────────────────────────────────
@@ -229,12 +319,29 @@ async def landing(request: web.Request) -> web.Response:
 async def login_page(request: web.Request) -> web.Response:
     session = _session_from_request(request)
     if session:
-        raise web.HTTPFound(f"/profile/{session['pan']}")
+        raise web.HTTPFound("/home")
+    err = request.query.get("err", "")
+    err_html = ""
+    if err == "pan_mismatch":
+        err_html = '<div class="note err">PAN doesn\'t match the Google account you signed in with.</div>'
+    elif err == "no_profile":
+        err_html = '<div class="note err">No SPEC-OPS profile linked to that Google account. Run /onboard in Discord first.</div>'
+    elif err == "bad_pan":
+        err_html = '<div class="note err">PAN format invalid. Expected like ABCDE1234F.</div>'
+
     body = f"""
     {_topbar(None)}
     <h1>Sign in</h1>
-    <p class="sub">Use the Google account you linked during <code>/onboard</code> in Discord.</p>
-    <a class="btn" href="/auth/google/login">Sign in with Google</a>
+    <p class="sub">Enter your PAN, then sign in with the Google account you linked at <code>/onboard</code>.</p>
+    {err_html}
+    <form method="get" action="/auth/google/login">
+      <div class="field">
+        <label>PAN</label>
+        <input type="text" name="pan" required minlength="10" maxlength="10"
+               style="text-transform:uppercase" placeholder="ABCDE1234F" autocomplete="off">
+      </div>
+      <button type="submit">Continue with Google</button>
+    </form>
     <div class="note">
       Haven't onboarded? Run <code>/onboard</code> in <code>#onboarding</code> on Discord first.
     </div>
@@ -242,8 +349,15 @@ async def login_page(request: web.Request) -> web.Response:
     return _layout("Sign in", body)
 
 
+import re as _re
+_PAN_RE = _re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
+
+
 async def auth_google_login(request: web.Request) -> web.Response:
-    return web.HTTPFound(google_login_url())
+    pan = (request.query.get("pan") or "").strip().upper()
+    if pan and not _PAN_RE.match(pan):
+        raise web.HTTPFound("/login?err=bad_pan")
+    return web.HTTPFound(google_login_url(pan or None))
 
 
 async def logout(request: web.Request) -> web.Response:
@@ -295,7 +409,7 @@ async def google_callback(request: web.Request) -> web.Response:
     if mode == "link":
         return await _handle_link(state, google_id, email)
     elif mode == "login":
-        return await _handle_login(google_id, email)
+        return await _handle_login(google_id, email, state.get("expected_pan"))
     else:
         return _layout("Unknown flow",
                        f'{_topbar(None)}<h1>Unknown flow</h1>',
@@ -367,7 +481,7 @@ async def _handle_link(state: dict, google_id: str, email: str) -> web.Response:
     return resp
 
 
-async def _handle_login(google_id: str, email: str) -> web.Response:
+async def _handle_login(google_id: str, email: str, expected_pan: str | None = None) -> web.Response:
     async with pool().acquire() as con:
         row = await con.fetchrow(
             """
@@ -379,14 +493,12 @@ async def _handle_login(google_id: str, email: str) -> web.Response:
         )
 
     if not row:
-        return _layout("No profile",
-                       f'{_topbar(None)}<h1>No profile</h1>'
-                       f'<p>No SPEC-OPS profile linked to <code>{h(email)}</code>. '
-                       f'Run <code>/onboard</code> in Discord first, then link Google.</p>'
-                       f'<a class="btn secondary" href="/login">Back</a>',
-                       status=404)
+        raise web.HTTPFound("/login?err=no_profile")
 
-    resp = web.HTTPFound(f"/profile/{row['pan']}")
+    if expected_pan and row["pan"] != expected_pan:
+        raise web.HTTPFound("/login?err=pan_mismatch")
+
+    resp = web.HTTPFound("/home")
     _set_session_cookie(resp, _session_cookie_value(
         row["pan"], row["discord_id"], row["name"], email,
     ))
@@ -612,6 +724,7 @@ def make_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/health", health)
     app.router.add_get("/", landing)
+    app.router.add_get("/home", home)
 
     app.router.add_get("/login", login_page)
     app.router.add_get("/logout", logout)
