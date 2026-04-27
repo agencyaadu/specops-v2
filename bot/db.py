@@ -70,26 +70,47 @@ CREATE TABLE IF NOT EXISTS factories (
     id            bigserial PRIMARY KEY,
     factory_id    text NOT NULL UNIQUE,
     name          text NOT NULL,
+    city          text,
     state         text NOT NULL DEFAULT 'ACTIVE',
     created_by    text,
     created_at    timestamptz NOT NULL DEFAULT now(),
     updated_at    timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE factories ADD COLUMN IF NOT EXISTS city text;
 
 CREATE TABLE IF NOT EXISTS operations (
     id              bigserial PRIMARY KEY,
     operation_id    text NOT NULL UNIQUE,
     factory_id      text NOT NULL REFERENCES factories (factory_id) ON DELETE RESTRICT,
     shift           text NOT NULL,
-    op_password     text NOT NULL,
+    op_password     text,
     state           text NOT NULL DEFAULT 'ACTIVE',
     created_by      text,
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now()
 );
 
+-- Extended fields for the imported CSV. Nullable additions.
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS unit                  text NOT NULL DEFAULT 'MAIN';
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS city                  text;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS map_link              text;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS poc1                  jsonb;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS poc2                  jsonb;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS sales_team_name       text;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS shift_start           time;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS shift_end             time;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS reporting_time        time;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS deployment_start      time;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS collection_start      time;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS report_submission_time time;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS final_closing_time    time;
+ALTER TABLE operations ADD COLUMN IF NOT EXISTS whatsapp_group_url    text;
+-- Drop the NOT NULL on op_password so imports without one can land.
+ALTER TABLE operations ALTER COLUMN op_password DROP NOT NULL;
+
 CREATE INDEX IF NOT EXISTS operations_factory_idx ON operations (factory_id);
 CREATE INDEX IF NOT EXISTS operations_state_idx   ON operations (state);
+CREATE INDEX IF NOT EXISTS operations_city_idx    ON operations (city);
 
 CREATE TABLE IF NOT EXISTS op_assignments (
     id                       bigserial PRIMARY KEY,

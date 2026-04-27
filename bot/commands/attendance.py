@@ -145,10 +145,9 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
             )
         return [app_commands.Choice(name=r["operation_id"], value=r["operation_id"]) for r in rows]
 
-    @tree.command(name="clock-in", description="Start your tour: pick op + password + role + photo + validator.")
+    @tree.command(name="clock-in", description="Start your tour: pick op + role + photo + validator.")
     @app_commands.describe(
         operation="Op you're posted to (autocomplete from active ops)",
-        op_password="The password for this op (ask the chief on site)",
         role="Your role on this op",
         photo="Sitrep photo proof",
         validator="Who'll validate (must be one rank above you)",
@@ -162,7 +161,6 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
     async def clock_in(
         interaction: discord.Interaction,
         operation: str,
-        op_password: str,
         role: app_commands.Choice[str],
         photo: discord.Attachment,
         validator: discord.Member,
@@ -184,7 +182,7 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
 
         async with pool().acquire() as con:
             op = await con.fetchrow(
-                "SELECT operation_id, op_password, state FROM operations WHERE operation_id = $1",
+                "SELECT operation_id, state FROM operations WHERE operation_id = $1",
                 operation.strip(),
             )
         if not op:
@@ -195,9 +193,6 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
             return
         if op["state"] != "ACTIVE":
             await interaction.followup.send(f"❌ Op `{operation}` is inactive.", ephemeral=True)
-            return
-        if op_password.strip() != op["op_password"]:
-            await interaction.followup.send("❌ Wrong op password. Ask the chief on site.", ephemeral=True)
             return
 
         if validator.id == interaction.user.id:
