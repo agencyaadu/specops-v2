@@ -72,11 +72,47 @@ def _state_login(expected_pan: str | None = None) -> str:
     return _signed(payload, STATE_TTL_SECONDS)
 
 
-def _session_cookie_value(pan: str, discord_id: str, name: str, email: str | None) -> str:
+def _session_cookie_value(pan: str, discord_id: str, name: str,
+                          email: str | None, is_admin: bool = False) -> str:
     return _signed(
-        {"pan": pan, "did": discord_id, "name": name, "email": email or ""},
+        {"pan": pan, "did": discord_id, "name": name,
+         "email": email or "", "admin": bool(is_admin)},
         SESSION_TTL_SECONDS,
     )
+
+
+async def _check_admin_role(discord_id: str) -> bool:
+    """Hit Discord API once at login to check if the user holds the
+    FREDDY or GENERAL role in the configured guild."""
+    guild_id = os.environ.get("GUILD_ID")
+    bot_token = os.environ.get("DISCORD_BOT_TOKEN")
+    if not (guild_id and bot_token):
+        return False
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(
+                f"https://discord.com/api/v10/guilds/{guild_id}/members/{discord_id}",
+                headers={"Authorization": f"Bot {bot_token}"},
+            )
+            if r.status_code != 200:
+                return False
+            member = r.json()
+            role_ids = set(member.get("roles", []))
+
+            # Resolve role names
+            roles_r = await client.get(
+                f"https://discord.com/api/v10/guilds/{guild_id}/roles",
+                headers={"Authorization": f"Bot {bot_token}"},
+            )
+            if roles_r.status_code != 200:
+                return False
+            id_to_name = {r["id"]: r["name"] for r in roles_r.json()}
+            user_role_names = {id_to_name.get(rid, "") for rid in role_ids}
+            return bool(user_role_names & {"FREDDY", "GENERAL"})
+    except Exception:
+        log.exception("_check_admin_role failed")
+        return False
 
 
 def _session_from_request(request: web.Request) -> dict | None:
@@ -233,6 +269,15 @@ def _topbar(session: dict | None) -> str:
 
 async def health(request: web.Request) -> web.Response:
     return web.Response(text="ok")
+
+
+async def recap_pdf(request: web.Request) -> web.Response:
+    """Serve the project recap PDF straight from the repo."""
+    from pathlib import Path
+    p = Path(__file__).resolve().parent.parent / "docs" / "SPEC-OPS_v2_recap.pdf"
+    if not p.exists():
+        return web.Response(status=404, text="recap not generated")
+    return web.FileResponse(p, headers={"Content-Type": "application/pdf"})
 
 
 async def landing(request: web.Request) -> web.Response:
@@ -498,9 +543,10 @@ async def _handle_login(google_id: str, email: str, expected_pan: str | None = N
     if expected_pan and row["pan"] != expected_pan:
         raise web.HTTPFound("/login?err=pan_mismatch")
 
+    is_admin = await _check_admin_role(row["discord_id"])
     resp = web.HTTPFound("/home")
     _set_session_cookie(resp, _session_cookie_value(
-        row["pan"], row["discord_id"], row["name"], email,
+        row["pan"], row["discord_id"], row["name"], email, is_admin,
     ))
     return resp
 
@@ -723,6 +769,7 @@ async def profile_save(request: web.Request) -> web.Response:
 def make_app() -> web.Application:
     app = web.Application()
     app.router.add_get("/health", health)
+    app.router.add_get("/recap.pdf", recap_pdf)
     app.router.add_get("/", landing)
     app.router.add_get("/home", home)
 
