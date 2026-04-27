@@ -61,14 +61,19 @@ class SpecOpsBot(discord.Client):
         validate.register(self.tree)
         admin.register(self.tree, self)
 
-        # Global sync; takes ~minutes to propagate. For instant testing,
-        # set GUILD_ID to copy_global_to + sync per-guild.
+        # GUILD_ID set -> sync only to that guild (instant).
+        # We also wipe the global registration so users don't see
+        # duplicates of every command in the picker.
         guild_id = os.environ.get("GUILD_ID")
         if guild_id:
+            try:
+                await self.http.bulk_upsert_global_commands(self.application_id, [])
+            except Exception:
+                log.exception("clearing global commands failed (non-fatal)")
             g = discord.Object(id=int(guild_id))
             self.tree.copy_global_to(guild=g)
             await self.tree.sync(guild=g)
-            log.info("slash commands synced to guild %s", guild_id)
+            log.info("slash commands synced to guild %s (globals cleared)", guild_id)
         else:
             await self.tree.sync()
             log.info("slash commands synced globally")
