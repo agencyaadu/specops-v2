@@ -145,25 +145,78 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
             )
         return [app_commands.Choice(name=r["operation_id"], value=r["operation_id"]) for r in rows]
 
+    async def validator_autocomplete(
+        interaction: discord.Interaction, current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """Autocomplete validator from op_assignments at the right rank tier.
+        Falls back to FREDDY/GENERAL Discord role members for CHIEF clock-ins."""
+        # Pull the op + role the user has typed/chosen so far.
+        op_id = (interaction.namespace.operation or "").strip() if hasattr(interaction.namespace, "operation") else ""
+        role_choice = getattr(interaction.namespace, "role", None)
+        role_value = role_choice.value if role_choice else None
+
+        VALIDATOR_RANKS_FOR = {
+            "OPERATOR": ["CAPTAIN", "CHIEF"],
+            "CAPTAIN":  ["CHIEF"],
+            "CHIEF":    [],  # see fallback below
+        }
+
+        choices: list[app_commands.Choice[str]] = []
+
+        if op_id and role_value and role_value in VALIDATOR_RANKS_FOR:
+            ranks = VALIDATOR_RANKS_FOR[role_value]
+            if ranks:
+                async with pool().acquire() as con:
+                    rows = await con.fetch(
+                        """
+                        SELECT a.person_discord_id, a.role, p.name
+                          FROM op_assignments a
+                          JOIN people p ON p.pan = a.person_pan
+                         WHERE a.operation_id = $1
+                           AND a.state = 'ACTIVE'
+                           AND a.role = ANY($2::text[])
+                         ORDER BY array_position($2::text[], a.role), p.name
+                         LIMIT 25
+                        """,
+                        op_id, ranks,
+                    )
+                for r in rows:
+                    label = f"{r['name']} · {r['role']}"
+                    if current.lower() in label.lower():
+                        choices.append(app_commands.Choice(name=label[:100], value=r["person_discord_id"]))
+
+        # CHIEF role -> validator is a GENERAL/FREDDY (server role, not assignment).
+        if role_value == "CHIEF" and interaction.guild is not None:
+            allowed_roles = {"FREDDY", "GENERAL"}
+            for member in interaction.guild.members:
+                if any(r.name in allowed_roles for r in member.roles):
+                    label = f"{member.display_name} · GENERAL"
+                    if current.lower() in label.lower():
+                        choices.append(app_commands.Choice(name=label[:100], value=str(member.id)))
+                if len(choices) >= 25:
+                    break
+
+        return choices[:25]
+
     @tree.command(name="clock-in", description="Start your tour: pick op + role + photo + validator.")
     @app_commands.describe(
         operation="Op you're posted to (autocomplete from active ops)",
         role="Your role on this op",
         photo="Sitrep photo proof",
-        validator="Who'll validate (must be one rank above you)",
+        validator="Who'll validate (autocomplete shows the assigned validators for this op)",
     )
     @app_commands.choices(role=[
         app_commands.Choice(name="OPERATOR", value="OPERATOR"),
         app_commands.Choice(name="CAPTAIN",  value="CAPTAIN"),
         app_commands.Choice(name="CHIEF",    value="CHIEF"),
     ])
-    @app_commands.autocomplete(operation=operation_autocomplete)
+    @app_commands.autocomplete(operation=operation_autocomplete, validator=validator_autocomplete)
     async def clock_in(
         interaction: discord.Interaction,
         operation: str,
         role: app_commands.Choice[str],
         photo: discord.Attachment,
-        validator: discord.Member,
+        validator: str,
     ):
         if interaction.guild is None:
             await interaction.response.send_message("Run this in a server.", ephemeral=True)
@@ -195,17 +248,60 @@ def register(tree: app_commands.CommandTree, client: discord.Client):
             await interaction.followup.send(f"❌ Op `{operation}` is inactive.", ephemeral=True)
             return
 
-        if validator.id == interaction.user.id:
-            await interaction.followup.send("❌ Can't pick yourself as validator.", ephemeral=True)
-            return
-        allowed = VALIDATOR_ROLE_FOR.get(role.value, set())
-        if not (_member_role_names(validator) & allowed):
+        # `validator` arrives as a discord_id string from autocomplete.
+        try:
+            validator_id = int(validator.strip())
+        except (ValueError, AttributeError):
             await interaction.followup.send(
-                f"❌ {validator.mention} can't validate a {role.value}. "
-                f"Need one of: {', '.join(sorted(allowed))}.",
+                "❌ Pick a validator from the autocomplete list (don't type a name freehand).",
                 ephemeral=True,
             )
             return
+
+        validator_member = interaction.guild.get_member(validator_id) if interaction.guild else None
+        if validator_member is None:
+            await interaction.followup.send(
+                "❌ Couldn't resolve that validator in this server. Pick again from the autocomplete.",
+                ephemeral=True,
+            )
+            return
+        if validator_member.id == interaction.user.id:
+            await interaction.followup.send("❌ Can't pick yourself as validator.", ephemeral=True)
+            return
+
+        # Verify validator is actually assigned at the right rank for this op
+        # (or has FREDDY/GENERAL Discord role for CHIEF clock-ins).
+        VALIDATOR_RANKS = {"OPERATOR": ("CAPTAIN", "CHIEF"), "CAPTAIN": ("CHIEF",)}
+        if role.value in VALIDATOR_RANKS:
+            async with pool().acquire() as con:
+                ok = await con.fetchval(
+                    """
+                    SELECT 1 FROM op_assignments
+                     WHERE operation_id = $1 AND person_discord_id = $2
+                       AND role = ANY($3::text[]) AND state = 'ACTIVE'
+                    """,
+                    operation.strip(), str(validator_member.id),
+                    list(VALIDATOR_RANKS[role.value]),
+                )
+            if not ok:
+                await interaction.followup.send(
+                    f"❌ {validator_member.mention} isn't assigned as a "
+                    f"{'/'.join(VALIDATOR_RANKS[role.value])} on this op. "
+                    "Ask command to assign them, or pick someone who is.",
+                    ephemeral=True,
+                )
+                return
+        else:  # CHIEF — validator must hold FREDDY or GENERAL Discord role
+            allowed = {"FREDDY", "GENERAL"}
+            if not (_member_role_names(validator_member) & allowed):
+                await interaction.followup.send(
+                    f"❌ {validator_member.mention} can't validate a CHIEF. "
+                    f"Need one of: {', '.join(sorted(allowed))}.",
+                    ephemeral=True,
+                )
+                return
+
+        validator = validator_member  # use the Member object for the rest of the handler
 
         if not _is_image_attachment(photo):
             await interaction.followup.send("❌ That doesn't look like an image attachment.", ephemeral=True)
