@@ -56,10 +56,12 @@ class SpecOpsBot(discord.Client):
         await init_schema()
         log.info("DB ready")
 
+        # Onboarding-only batch. Other commands are wired up but not
+        # exposed yet — re-enable in the attendance/admin batch.
         onboard.register(self.tree, self)
-        attendance.register(self.tree, self)
-        validate.register(self.tree)
-        admin.register(self.tree, self)
+        # attendance.register(self.tree, self)   # /clock-in, /clock-out
+        # validate.register(self.tree)           # validation button handlers
+        # admin.register(self.tree, self)        # /op-list, /op-roster, /assign-*
 
         # GUILD_ID set -> sync only to that guild (instant).
         # We also wipe the global registration so users don't see
